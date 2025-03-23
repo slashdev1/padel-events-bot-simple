@@ -1,6 +1,18 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
+const express = require('express')
+
+const app = express()
+const port = process.env.PORT;
+
+app.get('/', (req, res) => {
+    res.send('Bot is running!')
+})
+
+app.listen(port, () => {
+    console.log(`Express app listening on port ${port}`)
+})
 
 const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
 const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
