@@ -18,13 +18,17 @@ const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
 const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
 let db;
 let superAdminId;
+let botName;
 
 (async () => {
     await mongoClient.connect();
     db = mongoClient.db('padel_bot');
     console.log('Connected to MongoDB');
     superAdminId = (await globalSettingsCollection().findOne()).superAdminId;
-    bot.launch(() => console.log('Bot is running!'));
+    bot.launch(() => {
+        console.log('Bot is running!');
+        bot.telegram.getMe().then(data => console.log(botName = data.username));
+    });
 })();
 
 const gamesCollection = () => db.collection('games');
@@ -92,15 +96,17 @@ bot.command('active_games', async (ctx) => {
             if (ind >= 0 && ind >= game.maxPlayers) status = '⏳ У черзі';
             if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
             if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
-            lines.push(`📅 **${game.name} (${game.date})** - ${status}`);
+            lines.push({gameDate, text: `📅 **${game.name} (${game.date})** - ${status}`});
         });
-        if (lines.length)
-            response = '📋 **Активні ігри:**\n\n' + lines.join(`\n`);
+        if (lines.length) {
+            lines.sort((a, b) => (a.gameDate || 0) - (b.gameDate || 0));
+            response = '📋 **Активні ігри:**\n\n' + lines.map(elem => elem.text).join(`\n`);
+        }
     }
     try {
         await bot.telegram.sendMessage(userId, response);
     } catch (error) {
-        ctx.reply('Для отримання повідомлень від бота перейдіть на нього https://t.me/PadelEventsBot та натисніть Start.');
+        ctx.reply(`Для отримання повідомлень від бота перейдіть на нього https://t.me/${botName} та натисніть Start.`);
     }
 
 });
