@@ -56,7 +56,7 @@ bot.command('active_games', async (ctx) => {
         if (ind >= 0 && ind >= game.maxPlayers) status = '⏳ У черзі';
         if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
         if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
-        response += `📅 **${game.date}** - ${status}\n`;
+        response += `📅 **${game.name} (${game.date})** - ${status}\n`;
     });
     bot.telegram.sendMessage(userId, response);
 });
