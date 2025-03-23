@@ -23,29 +23,47 @@ let superAdminId;
     await mongoClient.connect();
     db = mongoClient.db('padel_bot');
     console.log('Connected to MongoDB');
-    superAdminId = (await settingsCollection().findOne()).superAdminId;
+    superAdminId = (await globalSettingsCollection().findOne()).superAdminId;
     bot.launch(() => console.log('Bot is running!'));
 })();
 
 const gamesCollection = () => db.collection('games');
-const settingsCollection = () => db.collection('settings');
+const globalSettingsCollection = () => db.collection('globalSettings');
+const chatSettingsCollection = () => db.collection('chatSettings');
 
 bot.command('add_game', async (ctx) => {
+    const chatId = ctx.chat.id;
     if (superAdminId !== ctx.from.id) {
-        const admins = await bot.telegram.getChatAdministrators(ctx.chat.id);
-        if (!admins || !admins.length || !admins.some(adm => adm.user.id === ctx.from.id)) {
+        const chatSettings = chatSettingsCollection().findOne({ chatId });
+        if (!chatSettings) {
+            const chatSettings = {
+                admins: []
+            }
+            const admins = await bot.telegram.getChatAdministrators(ctx.chat.id);
+            if (!admins || !admins.length) {
+                chatSettings.admins = admins.map(adm => {
+                    return {
+                        id: adm.user.id,
+                        name: adm.user.username || (adm.user.first_name + ' ' + adm.user.last_name).trim()
+                    }
+                });
+            };
+            await chatSettingsCollection().insertOne(chatSettings);
+        }
+        if (!chatSettings.admins || !chatSettings.admins.length || !chatSettings.admins.some(adm => adm.id === ctx.from.id)) {
             return ctx.reply('⚠️ Цю команду може використовувати лише адміністратор.');
         };
     }
 
-    const chatId = ctx.chat.id;
     const creatorId = ctx.from.id;
+    const creatorName = (ctx.from.first_name + ' ' + ctx.from.last_name).trim();
     const args = ctx.message.text.split(' ').slice(1);
     if (args.length < 3) return ctx.reply('Вкажіть назву гри, дату та кількість гравців. Приклад: /add_game Падел-матч 2025-03-25 8');
 
     const game = {
         chatId,
         creatorId,
+        creatorName,
         name: args[0],
         date: args[1],
         maxPlayers: parseInt(args[2]),
@@ -67,6 +85,8 @@ bot.command('active_games', async (ctx) => {
 
     let response = '📋 **Активні ігри:**\n\n';
     games.forEach(game => {
+        let gameDate = Date.parse(game.date);
+        if (gameDate && gameDate + 86400000 < Date.now()) return;
         let status = '-';
         let ind = game.players.filter(p => p.status === 'joined').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).findIndex(p => p.id === userId);
         if (ind >= 0 && ind < game.maxPlayers) status = '✅ Йду';
@@ -85,7 +105,7 @@ bot.action(/^decline_(.*)$/, async (ctx) => updateGameStatus(ctx, 'decline'));
 async function updateGameStatus(ctx, action) {
     const gameId = ctx.match[1];
     const userId = ctx.from.id;
-    const username = ctx.from.username || ctx.from.first_name;
+    const username = ctx.from.username || (ctx.from.first_name + ' ' + ctx.from.last_name).trim();
     const timestamp = new Date();//ctx.update.callback_query.date * 1000);
 
     const game = await gamesCollection().findOne({ _id: ObjectId.createFromHexString(gameId) });
@@ -93,12 +113,11 @@ async function updateGameStatus(ctx, action) {
 
     game.players = game.players.filter(p => p.id !== userId);
 
-    if (action === 'join') game.players.push({ id: userId, name: username, status: 'joined', timestamp });
-    if (action === 'pending') game.players.push({ id: userId, name: username, status: 'pending', timestamp: null });
-    if (action === 'decline') game.players.push({ id: userId, name: username, status: 'declined', timestamp: null });
+    if (action === 'join')    game.players.push({ id: userId, name: username, status: 'joined',   timestamp });
+    if (action === 'pending') game.players.push({ id: userId, name: username, status: 'pending',  timestamp });
+    if (action === 'decline') game.players.push({ id: userId, name: username, status: 'declined', timestamp });
 
     game.players.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-
     await gamesCollection().updateOne({ _id: game._id }, { $set: { players: game.players } });
 
     updateGameMessage(game, gameId);
@@ -111,7 +130,8 @@ const buildTextMessage = (game) => {
         `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, game.maxPlayers).map(p => `@${p.name}`).join(', ') || '-'}\n` +
         `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `@${p.name}`).join(', ') || '-'}\n` +
         `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `@${p.name}`).join(', ') || '-'}\n` +
-        `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `@${p.name}`).join(', ') || '-'}\n`;
+        `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `@${p.name}`).join(', ') || '-'}\n\n` +
+        `Опубліковано ${game.creatorName}`;
 }
 
 const buildMarkup = (gameId) => Markup.inlineKeyboard([
