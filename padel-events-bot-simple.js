@@ -7,11 +7,11 @@ const app = express()
 const port = process.env.PORT;
 
 app.get('/', (req, res) => {
-    res.send('Bot is running!')
+    res.send(`Bot is running! Follow to ${botUrl}`);
 })
 
 app.listen(port, () => {
-    console.log(`Express app listening on port ${port}`)
+    console.log(`Express app listening on port ${port}`);
 })
 
 const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
@@ -19,6 +19,7 @@ const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
 let db;
 let superAdminId;
 let botName;
+let botUrl;
 
 (async () => {
     await mongoClient.connect();
@@ -27,8 +28,12 @@ let botName;
     superAdminId = (await globalSettingsCollection().findOne()).superAdminId;
     bot.launch(() => {
         console.log('Bot is running!');
-        bot.telegram.getMe().then(data => console.log(botName = data.username));
+        bot.telegram.getMe().then(data => console.log(botName = data.username, botUrl = `https://t.me/${botName}`));
     });
+
+    // Enable graceful stop
+    process.once('SIGINT', () => bot.stop('SIGINT'));
+    process.once('SIGTERM', () => bot.stop('SIGTERM'));
 })();
 
 const gamesCollection = () => db.collection('games');
@@ -37,13 +42,17 @@ const chatSettingsCollection = () => db.collection('chatSettings');
 
 bot.command('add_game', async (ctx) => {
     const chatId = ctx.chat.id;
-    if (superAdminId !== ctx.from.id) {
-        const chatSettings = chatSettingsCollection().findOne({ chatId });
+    //if (superAdminId !== ctx.from.id) {
+        const chatSettings = await chatSettingsCollection().findOne({ chatId });
         if (!chatSettings) {
-            const chatSettings = {
-                admins: []
+            chatSettings = {
+                chatId,
+                level: 'free',
+                reminders: [],
+                admins: [],
+                permissions: [/* { command, appliesTo: ("all", "admins", "users"), users: []} */]
             }
-            const admins = await bot.telegram.getChatAdministrators(ctx.chat.id);
+            const admins = await bot.telegram.getChatAdministrators(chatId);
             if (!admins || !admins.length) {
                 chatSettings.admins = admins.map(adm => {
                     return {
@@ -54,10 +63,17 @@ bot.command('add_game', async (ctx) => {
             };
             await chatSettingsCollection().insertOne(chatSettings);
         }
-        if (!chatSettings.admins || !chatSettings.admins.length || !chatSettings.admins.some(adm => adm.id === ctx.from.id)) {
-            return ctx.reply('⚠️ Цю команду може використовувати лише адміністратор.');
-        };
-    }
+        const cmdPermission = chatSettings.permissions.find(elem => elem.command === 'add_game');
+        if (cmdPermission) {
+            let users = [];
+            if      (cmdPermission.appliesTo === 'all') users = undefined;
+            else if (cmdPermission.appliesTo === 'admins') users = chatSettings.admins;
+            else if (cmdPermission.appliesTo === 'users') users = cmdPermission.users;
+            if (users && !users.some(usr => usr.id === ctx.from.id)) {
+                return ctx.reply('⚠️ Цю команду може використовувати лише адміністратор.');
+            };
+        }
+    //}
 
     const creatorId = ctx.from.id;
     const creatorName = (ctx.from.first_name + ' ' + ctx.from.last_name).trim();
@@ -106,7 +122,7 @@ bot.command('active_games', async (ctx) => {
     try {
         await bot.telegram.sendMessage(userId, response);
     } catch (error) {
-        ctx.reply(`Для отримання повідомлень від бота перейдіть на нього https://t.me/${botName} та натисніть Start.`);
+        ctx.reply(`Для отримання повідомлень від бота перейдіть на нього ${botUrl} та натисніть Start.`);
     }
 
 });
