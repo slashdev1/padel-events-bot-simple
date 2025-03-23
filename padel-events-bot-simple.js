@@ -80,22 +80,29 @@ bot.command('active_games', async (ctx) => {
     const chatId = ctx.chat.id;
     const userId = ctx.from.id;
     const games = await gamesCollection().find({ chatId, isActive: true }).toArray();
+    let response = 'Немає активних ігор.';
+    if (games.length) {
+        const lines = [];
+        games.forEach(game => {
+            let gameDate = Date.parse(game.date);
+            if (gameDate && gameDate + 86400000 < Date.now()) return;
+            let status = '-';
+            let ind = game.players.filter(p => p.status === 'joined').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).findIndex(p => p.id === userId);
+            if (ind >= 0 && ind < game.maxPlayers) status = '✅ Йду';
+            if (ind >= 0 && ind >= game.maxPlayers) status = '⏳ У черзі';
+            if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
+            if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
+            lines.push(`📅 **${game.name} (${game.date})** - ${status}`);
+        });
+        if (lines.length)
+            response = '📋 **Активні ігри:**\n\n' + lines.join(`\n`);
+    }
+    try {
+        await bot.telegram.sendMessage(userId, response);
+    } catch (error) {
+        ctx.reply('Для отримання повідомлень від бота перейдіть на нього https://t.me/PadelEventsBot та натисніть Start.');
+    }
 
-    if (games.length === 0) return ctx.reply('Немає активних ігор.');
-
-    let response = '📋 **Активні ігри:**\n\n';
-    games.forEach(game => {
-        let gameDate = Date.parse(game.date);
-        if (gameDate && gameDate + 86400000 < Date.now()) return;
-        let status = '-';
-        let ind = game.players.filter(p => p.status === 'joined').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).findIndex(p => p.id === userId);
-        if (ind >= 0 && ind < game.maxPlayers) status = '✅ Йду';
-        if (ind >= 0 && ind >= game.maxPlayers) status = '⏳ У черзі';
-        if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
-        if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
-        response += `📅 **${game.name} (${game.date})** - ${status}\n`;
-    });
-    bot.telegram.sendMessage(userId, response);
 });
 
 bot.action(/^join_(.*)$/, async (ctx) => updateGameStatus(ctx, 'join'));
