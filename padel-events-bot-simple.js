@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
-const express = require('express')
+const express = require('express');
 
 const app = express()
 const port = process.env.PORT;
@@ -17,21 +17,26 @@ app.listen(port, () => {
 const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
 const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
 let db;
+let superAdminId;
 
 (async () => {
     await mongoClient.connect();
     db = mongoClient.db('padel_bot');
     console.log('Connected to MongoDB');
+    superAdminId = (await settingsCollection().findOne()).superAdminId;
     bot.launch(() => console.log('Bot is running!'));
 })();
 
 const gamesCollection = () => db.collection('games');
+const settingsCollection = () => db.collection('settings');
 
 bot.command('add_game', async (ctx) => {
-    const admins = await bot.telegram.getChatAdministrators(ctx.chat.id);
-    if( !admins || !admins.length || !admins.some(adm => adm.user.id === ctx.from.id)) {
-        return ctx.reply('⚠️ Цю команду може використовувати лише адміністратор.');
-    };
+    if (superAdminId !== ctx.from.id) {
+        const admins = await bot.telegram.getChatAdministrators(ctx.chat.id);
+        if (!admins || !admins.length || !admins.some(adm => adm.user.id === ctx.from.id)) {
+            return ctx.reply('⚠️ Цю команду може використовувати лише адміністратор.');
+        };
+    }
 
     const chatId = ctx.chat.id;
     const creatorId = ctx.from.id;
