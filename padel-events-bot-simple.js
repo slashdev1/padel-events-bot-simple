@@ -1,4 +1,21 @@
-require('dotenv').config();
+const dotenv = require('dotenv');
+const env = process.env.NODE_ENV || 'development';
+switch (env) {
+    case 'development':
+        dotenv.config({ path: '.env.development' });
+        break;
+    case 'test':
+        dotenv.config({ path: '.env.test' });
+        break;
+    case 'staging':
+        dotenv.config({ path: '.env.staging' });
+        break;
+    case 'production':
+        dotenv.config({ path: '.env.production' });
+        break;
+    default:
+        throw new Error(`Unknown environment: ${env}`);
+}
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
@@ -23,9 +40,10 @@ let botUrl;
 
 (async () => {
     await mongoClient.connect();
-    db = mongoClient.db('padel_bot');
-    console.log('Connected to MongoDB');
-    superAdminId = (await globalSettingsCollection().findOne()).superAdminId;
+    const dbName = process.env.PADEL_DB_NAME;
+    db = mongoClient.db(dbName);
+    console.log(`Connected to MongoDB (db ${dbName})`);
+    superAdminId = (await globalSettingsCollection().findOne())?.superAdminId;
     bot.launch(() => {
         console.log('Bot is running!');
         bot.telegram.getMe().then(data => console.log(botName = data.username, botUrl = `https://t.me/${botName}`));
@@ -54,7 +72,7 @@ const str2params = (str) => str.match(/\\?.|^$/g).reduce((p, c) => {
 bot.command('add_game', async (ctx) => {
     const chatId = ctx.chat.id;
     //if (superAdminId !== ctx.from.id) {
-        const chatSettings = await chatSettingsCollection().findOne({ chatId });
+        let chatSettings = await chatSettingsCollection().findOne({ chatId });
         if (!chatSettings) {
             chatSettings = {
                 chatId,
@@ -135,7 +153,7 @@ bot.command('active_games', async (ctx) => {
         }
     }
     try {
-        await bot.telegram.sendMessage(userId, response);
+        await bot.telegram.sendMessage(userId, response, { parse_mode: 'Markdown' });
     } catch (error) {
         ctx.reply(`Для отримання повідомлень від бота перейдіть на нього ${botUrl} та натисніть Start.`);
     }
