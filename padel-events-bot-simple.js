@@ -37,6 +37,10 @@ let db;
 let superAdminId;
 let botName;
 let botUrl;
+const botCommands = {
+    'add_game': { description: 'Cтворює гру.', example: 'Вкажіть назву гри, дату та кількість гравців. Приклад: /add_game "Падел матч вт 19-21" 2025-03-25 8' },
+    'active_games': { description: 'Показує перелік активних ігор, на які записувався ігрок.' }
+};
 
 (async () => {
     await mongoClient.connect();
@@ -69,8 +73,29 @@ const str2params = (str) => str.match(/\\?.|^$/g).reduce((p, c) => {
     return  p;
 }, {a: ['']}).a;
 
+const date2int = (date) => (typeof date === 'string' ? Date.parse(date) : (date instanceof Date ? date.getTime() : +date)) || 0;
+const date2text = (date) => {
+    let int = date2int(date);
+    if (!int) return '';
+    return new Date(int).toLocaleDateString('uk-UA', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+};
+
+bot.command('help', async (ctx) => {
+    ctx.reply('Список підтримуємих команд:\n' +
+        Object.keys(botCommands).map(key => {
+            let cmd = botCommands[key];
+            return `    /${key} - ${cmd.description} ${cmd.example}`;
+        }).join('\n'));
+});
+
 bot.command('add_game', async (ctx) => {
     const chatId = ctx.chat.id;
+    let [cmdName, ...args] = str2params(ctx.message.text);
+    cmdName = cmdName.slice(1);
     //if (superAdminId !== ctx.from.id) {
         let chatSettings = await chatSettingsCollection().findOne({ chatId });
         if (!chatSettings) {
@@ -89,36 +114,37 @@ bot.command('add_game', async (ctx) => {
                     chatSettings.admins = admins.map(adm => {
                         return {
                             id: adm.user.id,
-                            name: adm.user.username || (adm.user.first_name + ' ' + adm.user.last_name).trim()
+                            name: adm.user.username ? '@' + adm.user.username : (adm.user.first_name + ' ' + (adm.user.last_name || '')).trim()
                         }
                     });
                 };
             }
             await chatSettingsCollection().insertOne(chatSettings);
         }
-        const cmdPermission = chatSettings.permissions.find(elem => elem.command === 'add_game');
+        const cmdPermission = chatSettings.permissions.find(elem => elem.command === cmdName);
         if (cmdPermission) {
             let users = [];
             if      (cmdPermission.appliesTo === 'all') users = undefined;
             else if (cmdPermission.appliesTo === 'admins') users = chatSettings.admins;
             else if (cmdPermission.appliesTo === 'users') users = cmdPermission.users;
             if (users && !users.some(usr => usr.id === ctx.from.id)) {
-                return ctx.reply('⚠️ Цю команду може використовувати лише адміністратор.');
+                return ctx.reply('⚠️ У вас немає повноважень на використання цієї команди.');
             };
         }
     //}
 
     const creatorId = ctx.from.id;
-    const creatorName = (ctx.from.first_name + ' ' + ctx.from.last_name).trim();
-    const args = str2params(ctx.message.text).slice(1);
-    if (args.length < 3) return ctx.reply('Вкажіть назву гри, дату та кількість гравців. Приклад: /add_game Падел-матч 2025-03-25 8');
+    const creatorName = (ctx.from.first_name + ' ' + (ctx.from.last_name || '')).trim();
+    if (args.length < 3) return ctx.reply(botCommands[cmdName].example);
+    let parsedDate = Date.parse(args[1]);
+    if (!parsedDate) return ctx.reply('Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
 
     const game = {
         chatId,
         creatorId,
         creatorName,
         name: args[0],
-        date: args[1],
+        date: new Date(parsedDate),
         maxPlayers: parseInt(args[2]),
         players: [],
         isActive: true
@@ -132,12 +158,14 @@ bot.command('add_game', async (ctx) => {
 bot.command('active_games', async (ctx) => {
     const chatId = ctx.chat.id;
     const userId = ctx.from.id;
-    const games = await gamesCollection().find({ chatId, isActive: true }).toArray();
+    const filter = { isActive: true };
+    if (chatId < 0) filter.chatId = chatId;
+    const games = await gamesCollection().find(filter).toArray();
     let response = 'Немає активних ігор.';
     if (games.length) {
         const lines = [];
         games.forEach(game => {
-            let gameDate = Date.parse(game.date);
+            let gameDate = date2int(game.date);
             if (gameDate && gameDate + 86400000 < Date.now()) return;
             let status = '-';
             let ind = game.players.filter(p => p.status === 'joined').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).findIndex(p => p.id === userId);
@@ -145,7 +173,7 @@ bot.command('active_games', async (ctx) => {
             if (ind >= 0 && ind >= game.maxPlayers) status = '⏳ У черзі';
             if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
             if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
-            lines.push({gameDate, text: `📅 **${game.name} (${game.date})** - ${status}`});
+            lines.push({gameDate, text: `📅 **${game.name} (${date2text(game.date)})** - ${status}`});
         });
         if (lines.length) {
             lines.sort((a, b) => (a.gameDate || 0) - (b.gameDate || 0));
@@ -167,7 +195,7 @@ bot.action(/^decline_(.*)$/, async (ctx) => updateGameStatus(ctx, 'decline'));
 async function updateGameStatus(ctx, action) {
     const gameId = ctx.match[1];
     const userId = ctx.from.id;
-    const username = ctx.from.username || (ctx.from.first_name + ' ' + ctx.from.last_name).trim();
+    const username = ctx.from.username ? '@' + ctx.from.username : (ctx.from.first_name + ' ' + (ctx.from.last_name || '')).trim();
     const timestamp = new Date();//ctx.update.callback_query.date * 1000);
 
     const game = await gamesCollection().findOne({ _id: ObjectId.createFromHexString(gameId) });
@@ -185,15 +213,20 @@ async function updateGameStatus(ctx, action) {
     updateGameMessage(game, gameId);
 }
 
+const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_');
+
 const buildTextMessage = (game) => {
     const players = game.players || [];
-    return `📅 **${game.name} (${game.date})**\n\n` +
+    const m = (username) => (username[0] != '@' && username.indexOf(' ') == -1 ? '@' : '') + username; // support values of usernames for older versions DB
+    return textMarkdownNormalize(
+        `📅 **${game.name} (${date2text(game.date)})**\n\n` +
         `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}/${game.maxPlayers}\n` +
-        `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, game.maxPlayers).map(p => `@${p.name}`).join(', ') || '-'}\n` +
-        `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `@${p.name}`).join(', ') || '-'}\n` +
-        `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `@${p.name}`).join(', ') || '-'}\n` +
-        `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `@${p.name}`).join(', ') || '-'}\n\n` +
-        `Опубліковано ${game.creatorName}`;
+        `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, game.maxPlayers).map(p => `${m(p.name)}`).join(', ') || '-'}\n` +
+        `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `${m(p.name)}`).join(', ') || '-'}\n` +
+        `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `${m(p.name)}`).join(', ') || '-'}\n` +
+        `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `${m(p.name)}`).join(', ') || '-'}\n\n` +
+        `Опубліковано ${game.creatorName}`
+    );
 }
 
 const buildMarkup = (gameId) => Markup.inlineKeyboard([
