@@ -40,6 +40,17 @@ const gamesCollection = () => db.collection('games');
 const globalSettingsCollection = () => db.collection('globalSettings');
 const chatSettingsCollection = () => db.collection('chatSettings');
 
+const str2params = (str) => str.match(/\\?.|^$/g).reduce((p, c) => {
+    if(c === '"'){
+        p.quote ^= 1;
+    }else if(!p.quote && c === ' '){
+        p.a.push('');
+    }else{
+        p.a[p.a.length-1] += c.replace(/\\(.)/,"$1");
+    }
+    return  p;
+}, {a: ['']}).a;
+
 bot.command('add_game', async (ctx) => {
     const chatId = ctx.chat.id;
     //if (superAdminId !== ctx.from.id) {
@@ -47,20 +58,24 @@ bot.command('add_game', async (ctx) => {
         if (!chatSettings) {
             chatSettings = {
                 chatId,
+                chatName: ctx.chat.title,
+                allMembersAreAdministrators: ctx.chat.all_members_are_administrators,
                 level: 'free',
                 reminders: [],
                 admins: [],
                 permissions: [/* { command, appliesTo: ("all", "admins", "users"), users: []} */]
             }
-            const admins = await bot.telegram.getChatAdministrators(chatId);
-            if (!admins || !admins.length) {
-                chatSettings.admins = admins.map(adm => {
-                    return {
-                        id: adm.user.id,
-                        name: adm.user.username || (adm.user.first_name + ' ' + adm.user.last_name).trim()
-                    }
-                });
-            };
+            if (!chatSettings.allMembersAreAdministrators) {
+                const admins = await bot.telegram.getChatAdministrators(chatId);
+                if (!admins || !admins.length) {
+                    chatSettings.admins = admins.map(adm => {
+                        return {
+                            id: adm.user.id,
+                            name: adm.user.username || (adm.user.first_name + ' ' + adm.user.last_name).trim()
+                        }
+                    });
+                };
+            }
             await chatSettingsCollection().insertOne(chatSettings);
         }
         const cmdPermission = chatSettings.permissions.find(elem => elem.command === 'add_game');
@@ -77,7 +92,7 @@ bot.command('add_game', async (ctx) => {
 
     const creatorId = ctx.from.id;
     const creatorName = (ctx.from.first_name + ' ' + ctx.from.last_name).trim();
-    const args = ctx.message.text.split(' ').slice(1);
+    const args = str2params(ctx.message.text).slice(1);
     if (args.length < 3) return ctx.reply('Вкажіть назву гри, дату та кількість гравців. Приклад: /add_game Падел-матч 2025-03-25 8');
 
     const game = {
