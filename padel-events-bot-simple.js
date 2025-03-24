@@ -1,4 +1,4 @@
-const dotenv = require('dotenv');
+/*const dotenv = require('dotenv');
 const env = process.env.NODE_ENV || 'development';
 switch (env) {
     case 'development':
@@ -15,10 +15,15 @@ switch (env) {
         break;
     default:
         throw new Error(`Unknown environment: ${env}`);
-}
+}*/
+const loadEnvConfig = require('./config');
+loadEnvConfig();
+
+const {str2params, date2int, date2text, textMarkdownNormalize} = require('./utils');
+
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
-const express = require('express');
+/*const express = require('express');
 
 const app = express()
 const port = process.env.PORT;
@@ -29,12 +34,14 @@ app.get('/', (req, res) => {
 
 app.listen(port, () => {
     console.log(`Express app listening on port ${port}`);
-})
+})*/
+const {express, updateExtra} = require('./express');
+express(process.env.PORT);
 
 const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
 const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
 let db;
-let superAdminId;
+//let superAdminId;
 let botName;
 let botUrl;
 const botCommands = {
@@ -50,7 +57,12 @@ const botCommands = {
     superAdminId = (await globalSettingsCollection().findOne())?.superAdminId;
     bot.launch(() => {
         console.log('Bot is running!');
-        bot.telegram.getMe().then(data => console.log(botName = data.username, botUrl = `https://t.me/${botName}`));
+        bot.telegram.getMe().then(data => {
+            botName = data.username;
+            botUrl = `https://t.me/${botName}`;
+            updateExtra({botName, botUrl});
+            console.log(botName, botUrl);
+        });
     });
 
     // Enable graceful stop
@@ -62,7 +74,7 @@ const gamesCollection = () => db.collection('games');
 const globalSettingsCollection = () => db.collection('globalSettings');
 const chatSettingsCollection = () => db.collection('chatSettings');
 
-const str2params = (str) => str.match(/\\?.|^$/g).reduce((p, c) => {
+/*const str2params = (str) => str.match(/\\?.|^$/g).reduce((p, c) => {
     if(c === '"'){
         p.quote ^= 1;
     }else if(!p.quote && c === ' '){
@@ -82,14 +94,16 @@ const date2text = (date) => {
         month: '2-digit',
         day: '2-digit',
     });
-};
+};*/
 
 bot.command('help', async (ctx) => {
-    ctx.reply('Список підтримуємих команд:\n' +
+    ctx.reply('👾 Список підтримуємих команд:\n' +
         Object.keys(botCommands).map(key => {
             let cmd = botCommands[key];
-            return `    /${key} - ${cmd.description} ${cmd.example}`;
-        }).join('\n'));
+            return `    /${key} - ${cmd.description} ${cmd.example || ''}`;
+        }).join('\n') +
+        '\n\n💡 Користуватись ботом дуже просто:\n    1. Додайте бота до групи або каналу\n    2. І ось ви вже можете використовувути вишезазначені команди'
+    );
 });
 
 bot.command('add_game', async (ctx) => {
@@ -106,7 +120,8 @@ bot.command('add_game', async (ctx) => {
                 level: 'free',
                 reminders: [],
                 admins: [],
-                permissions: [/* { command, appliesTo: ("all", "admins", "users"), users: []} */]
+                permissions: [/* { command, appliesTo: ("all", "admins", "users"), users: []} */],
+                features: [/* { feature } */]
             }
             if (!chatSettings.allMembersAreAdministrators) {
                 const admins = await bot.telegram.getChatAdministrators(chatId);
@@ -159,15 +174,19 @@ bot.command('active_games', async (ctx) => {
     const chatId = ctx.chat.id;
     const userId = ctx.from.id;
     const filter = { isActive: true };
-    if (chatId < 0) filter.chatId = chatId;
+    let where = '';
+    if (chatId < 0) {
+        filter.chatId = chatId;
+        where = ' у ' + ctx.chat.title;
+    }
     const games = await gamesCollection().find(filter).toArray();
-    let response = 'Немає активних ігор.';
+    let response = `Немає активних ігор${where}.`;
     if (games.length) {
         const lines = [];
         games.forEach(game => {
             let gameDate = date2int(game.date);
             if (gameDate && gameDate + 86400000 < Date.now()) return;
-            let status = '-';
+            let status = ' Ще не має статусу';
             let ind = game.players.filter(p => p.status === 'joined').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).findIndex(p => p.id === userId);
             if (ind >= 0 && ind < game.maxPlayers) status = '✅ Йду';
             if (ind >= 0 && ind >= game.maxPlayers) status = '⏳ У черзі';
@@ -177,7 +196,7 @@ bot.command('active_games', async (ctx) => {
         });
         if (lines.length) {
             lines.sort((a, b) => (a.gameDate || 0) - (b.gameDate || 0));
-            response = '📋 **Активні ігри:**\n\n' + lines.map(elem => elem.text).join(`\n`);
+            response = `📋 **Активні ігри${where}:**\n\n` + lines.map(elem => elem.text).join(`\n`);
         }
     }
     try {
@@ -213,7 +232,7 @@ async function updateGameStatus(ctx, action) {
     updateGameMessage(game, gameId);
 }
 
-const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_');
+//const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_');
 
 const buildTextMessage = (game) => {
     const players = game.players || [];
@@ -250,3 +269,11 @@ async function writeGameMessage(ctx, game, gameId) {
 
     return await ctx.reply(buildTextMessage(game), { parse_mode: 'Markdown', ...buildMarkup(gameId) });
 }
+/*
+// Start the bot
+const startBot = () => {
+
+};
+
+startBot();
+*/
