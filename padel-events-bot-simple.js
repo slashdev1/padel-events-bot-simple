@@ -188,7 +188,7 @@ async function updateGameMessage(game, gameId) {
     if (!game) return;
 
     try {
-        return await bot.telegram.editMessageText(game.chatId, game.messageId, null, buildTextMessage(game), buildMarkup(gameId));
+        return await bot.telegram.editMessageText(game.chatId, game.messageId, null, buildTextMessage(game), { parse_mode: 'Markdown', ...buildMarkup(gameId) });
     } catch (error) {
         console.error(error);
     }
@@ -197,5 +197,5 @@ async function updateGameMessage(game, gameId) {
 async function writeGameMessage(ctx, game, gameId) {
     if (!game) return;
 
-    return await ctx.reply(buildTextMessage(game), buildMarkup(gameId));
+    return await ctx.reply(buildTextMessage(game), { parse_mode: 'Markdown', ...buildMarkup(gameId) });
 }
