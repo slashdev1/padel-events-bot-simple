@@ -1,5 +1,5 @@
 // Utility functions
-const str2params = (str) => str.match(/\\?.|^$/g).reduce((p, c) => {
+const str2params = (str) => str/*.match(/\\?.|^$/g)*/.split('').reduce((p, c) => {
     if (c === '"') {
         p.quote ^= 1;
     } else if (!p.quote && c === ' ') {

@@ -20,7 +20,7 @@ const loadEnvConfig = require('./config');
 loadEnvConfig();
 
 const {str2params, date2int, date2text, getStatusByAction, textMarkdownNormalize, extractUserTitle} = require('./utils');
-
+const cron = require('node-cron');
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
 /*const express = require('express');
@@ -44,12 +44,12 @@ let db;
 //let superAdminId;
 let botName;
 let botUrl;
-const botCommands = {
+const botCommands = /*{
     'add_game': { description: 'Cтворює гру.', example: 'Вкажіть назву гри, дату та кількість гравців. Приклад: /add_game "Падел матч вт 19-21" 2025-03-25 8' },
     'active_games': { description: 'Показує перелік активних ігор, на які записувався ігрок.' }
-};
+};*/ require('./commands-descriptions.json');
 
-(async () => {
+const start = async () => {
     await mongoClient.connect();
     const dbName = process.env.PADEL_DB_NAME;
     db = mongoClient.db(dbName);
@@ -68,9 +68,10 @@ const botCommands = {
     // Enable graceful stop
     process.once('SIGINT', () => bot.stop('SIGINT'));
     process.once('SIGTERM', () => bot.stop('SIGTERM'));
-})();
+};
 
 const gamesCollection = () => db.collection('games');
+const usersCollection = () => db.collection('users');
 const globalSettingsCollection = () => db.collection('globalSettings');
 const chatSettingsCollection = () => db.collection('chatSettings');
 
@@ -96,13 +97,27 @@ const date2text = (date) => {
     });
 };*/
 
+bot.command('start', async (ctx) => {
+    const user = ctx.from;
+    updateUser({...user, started: true, startedTimestamp: new Date()});
+    let message = botCommands['start']?.description;
+    if (!message) return;
+    let tpl = eval('`'+message+'`');
+    if (ctx.chat.id < 0)
+        bot.telegram.sendMessage(user.id, tpl, { parse_mode: 'Markdown' });
+    else
+        ctx.reply(tpl);
+});
+
 bot.command('help', async (ctx) => {
     ctx.reply('👾 Список підтримуємих команд:\n' +
-        Object.keys(botCommands).map(key => {
-            let cmd = botCommands[key];
-            return `    /${key} - ${cmd.description} ${cmd.example || ''}`;
-        }).join('\n') +
-        '\n\n💡 Користуватись ботом дуже просто:\n    1. Додайте бота до групи або каналу\n    2. І ось ви вже можете використовувути вишезазначені команди'
+        Object.keys(botCommands)
+            .filter(key => botCommands[key].isDisplayable !== false)
+            .map(key => {
+                let cmd = botCommands[key];
+                return `    /${key} - ${cmd.description} ${cmd.example || ''}`;
+            }).join('\n') + botCommands['help'].extra || ''
+        //'\n\n💡 Користуватись ботом дуже просто:\n    1. Додайте бота до групи або каналу\n    2. І ось ви вже можете використовувати вишезазначені команди'
     );
 });
 
@@ -201,20 +216,55 @@ bot.command('active_games', async (ctx) => {
             response = `📋 **Активні ігри${where}:**\n\n` + lines.map(elem => elem.text).join(`\n`);
         }
     }
-    try {
+    /*try {
         await bot.telegram.sendMessage(userId, response, { parse_mode: 'Markdown' });
     } catch (error) {
         ctx.reply(`Для отримання повідомлень від бота перейдіть на нього ${botUrl} та натисніть Start.`);
-    }
-
+    }*/
+    replyToUser(ctx, response);
 });
 
 bot.action(/^join_(.*)$/, async (ctx) => updateGameStatus(ctx, 'join'));
 bot.action(/^pending_(.*)$/, async (ctx) => updateGameStatus(ctx, 'pending'));
 bot.action(/^decline_(.*)$/, async (ctx) => updateGameStatus(ctx, 'decline'));
 
+const replyToUser = async (ctx, message) => {
+    const replyWarning = (ctx) => ctx.reply(`Для отримання повідомлень від бота перейдіть на нього ${botUrl} та натисніть Start.`);
+    const userId = ctx.from.id;
+    const user = await usersCollection().findOne({ userId });
+    if (user && user.started) {
+        try {
+            await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error(JSON.stringify(error));
+            if (error?.code === 403) {
+                replyWarning(ctx);
+                updateUser({...ctx.from, started: false, startedTimestamp: new Date()});
+            } else
+                ctx.reply(message);
+        }
+    } else
+        replyWarning(ctx);
+}
+
+const updateUser = (userData) => {
+    const fields = {};
+    if ('id' in userData)               fields.userId = userData.id;
+    if ('started' in userData)          fields.started = userData.started;
+    if ('startedTimestamp' in userData) fields.startedTimestamp = userData.startedTimestamp;
+    if ('first_name' in userData)       fields.firstName = userData.first_name;
+    if ('last_name' in userData)        fields.lastName = userData.last_name;
+    if ('username' in userData)         fields.username = userData.username;
+    usersCollection().updateOne(
+        { userId: userData.id },
+        { $set: fields },
+        { upsert: true }
+    );
+}
+
 async function updateGameStatus(ctx, action) {
-    const gameId = ctx.match[1];
+    const [gameId, extraAction] = ctx.match[1].split('_');
+    //console.log('extraAction='+extraAction);
     const userId = ctx.from.id;
     const username = extractUserTitle(ctx.from);//ctx.from.username ? '@' + ctx.from.username : (ctx.from.first_name + ' ' + (ctx.from.last_name || '')).trim();
     const timestamp = new Date();//ctx.update.callback_query.date * 1000);
@@ -223,16 +273,37 @@ async function updateGameStatus(ctx, action) {
     if (!game || !game.isActive) return;
 
     const newStatus = getStatusByAction(action);
-    const playerInd = game.players.findIndex(p => p.id === userId);
-    if (playerInd >= 0) {
-        if (game.players[playerInd].status === newStatus) {
-            // status not changed
-            return;
+    let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer);
+    //console.log('playerInd='+playerInd);
+    if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
+        return ctx.reply('Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
+    }
+    let extraPlayer = game.players.length && Math.max(...game.players.map(elem => elem.extraPlayer)) || 0;
+    if (extraAction) {
+        //extraPlayer = Math.max(...game.players.map(elem => elem.extraPlayer)) || 0;
+        if (extraAction === 'minus') {
+            if (extraPlayer <= 0) {
+                return// console.log('Не має кого видалять');
+            }
+            playerInd = game.players.findIndex(p => p.id === userId && p.extraPlayer === extraPlayer);
+            game.players.splice(playerInd, 1);
+        } else
+            extraPlayer++;
+    } else {
+        if (playerInd >= 0) {
+            if (game.players[playerInd].status === newStatus) {
+                // status not changed
+                return;
+            }
+            if (extraPlayer > 0) {
+                return ctx.reply('Перед тим як змінювати свій статус видмініть похід на гру для додаткових ігроків, яких ви залучили.');
+            }
+            game.players.splice(playerInd, 1);
         }
-        game.players.splice(playerInd, 1);
     }
 
-    game.players.push({ id: userId, name: username, status: newStatus, timestamp });
+    if (extraAction !== 'minus')
+        game.players.push({ id: userId, name: username, extraPlayer, status: newStatus, timestamp });
     game.players.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     await gamesCollection().updateOne({ _id: game._id }, { $set: { players: game.players } });
 
@@ -241,25 +312,28 @@ async function updateGameStatus(ctx, action) {
 
 //const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_');
 
-const buildTextMessage = (game) => {
+const  buildTextMessage = (game) => {
     const players = game.players || [];
-    const m = (username) => (username[0] != '@' && username.indexOf(' ') == -1 ? '@' : '') + username; // support values of usernames for older versions DB
+    const m = (user) => (user.name[0] != '@' && user.name.indexOf(' ') == -1 ? '@' : '') + user.name +
+        (user.extraPlayer ? '(+' + user.extraPlayer + ')': ''); // support values of usernames for older versions DB
     return textMarkdownNormalize(
         `📅 **${game.name} (${date2text(game.date)})**\n\n` +
         `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}/${game.maxPlayers}\n` +
-        `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, game.maxPlayers).map(p => `${m(p.name)}`).join(', ') || '-'}\n` +
-        `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `${m(p.name)}`).join(', ') || '-'}\n` +
-        `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `${m(p.name)}`).join(', ') || '-'}\n` +
-        `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `${m(p.name)}`).join(', ') || '-'}\n\n` +
+        `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, game.maxPlayers).map(p => `${m(p)}`).join(', ') || '-'}\n` +
+        `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `${m(p)}`).join(', ') || '-'}\n` +
+        `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `${m(p)}`).join(', ') || '-'}\n` +
+        `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `${m(p)}`).join(', ') || '-'}\n\n` +
         `Опубліковано ${game.creatorName}`
     );
 }
 
 const buildMarkup = (gameId) => Markup.inlineKeyboard([
-    [Markup.button.callback('✅ Йду', `join_${gameId}`)],
-    [Markup.button.callback('❓ Треба подумати', `pending_${gameId}`)],
-    [Markup.button.callback('❌ Не йду', `decline_${gameId}`)]
-]);
+    Markup.button.callback('✅ Йду', `join_${gameId}`),
+    Markup.button.callback('❓ Подумаю', `pending_${gameId}`),
+    Markup.button.callback('❌ Не йду', `decline_${gameId}`),
+    Markup.button.callback('✅ Йду +', `join_${gameId}_plus`),
+    Markup.button.callback('❌ Не йду -', `decline_${gameId}_minus`)
+], {columns: 3});
 
 async function updateGameMessage(game, gameId) {
     if (!game) return;
@@ -276,11 +350,13 @@ async function writeGameMessage(ctx, game, gameId) {
 
     return await ctx.reply(buildTextMessage(game), { parse_mode: 'Markdown', ...buildMarkup(gameId) });
 }
-/*
-// Start the bot
-const startBot = () => {
 
-};
+cron.schedule('*/15 * * * *', () => {
+    const date = new Date();
+    gamesCollection().updateMany(
+        { $and: [{isActive: true}, {date: {$lte : date}}] },
+        { $set: { isActive: false } }
+    ).then(res => res.modifiedCount && console.log(`Deactivated ${res.modifiedCount} tasks`));
+});
 
-startBot();
-*/
+start();

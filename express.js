@@ -10,7 +10,7 @@ module.exports = {
         const app = express();
 
         app.get('/', (req, res) => {
-            res.send(`Bot is running! Follow to ${extraData?.botUrl}`);
+            res.send(`Bot is running! Follow to <a href="${extraData?.botUrl}">${extraData?.botUrl}</a>`);
         })
 
         app.listen(port, () => {
