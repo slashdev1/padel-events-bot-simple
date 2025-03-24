@@ -22,6 +22,21 @@ const date2text = (date) => {
     });
 };
 
+const getStatusByAction = (action) => {
+    if (action === 'join')    return 'joined';
+    if (action === 'pending') return 'pending';
+    if (action === 'decline') return 'declined';
+}
+
 const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_');
 
-module.exports = {str2params, date2int, date2text, textMarkdownNormalize};
+const extractUserTitle = (user, useUserName) => user.username && useUserName !== false ? '@' + user.username : (user.first_name + ' ' + (user.last_name || '')).trim();
+
+module.exports = {
+    str2params,
+    date2int,
+    date2text,
+    textMarkdownNormalize,
+    getStatusByAction,
+    extractUserTitle
+};

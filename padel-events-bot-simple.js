@@ -19,7 +19,7 @@ switch (env) {
 const loadEnvConfig = require('./config');
 loadEnvConfig();
 
-const {str2params, date2int, date2text, textMarkdownNormalize} = require('./utils');
+const {str2params, date2int, date2text, getStatusByAction, textMarkdownNormalize, extractUserTitle} = require('./utils');
 
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
@@ -129,7 +129,7 @@ bot.command('add_game', async (ctx) => {
                     chatSettings.admins = admins.map(adm => {
                         return {
                             id: adm.user.id,
-                            name: adm.user.username ? '@' + adm.user.username : (adm.user.first_name + ' ' + (adm.user.last_name || '')).trim()
+                            name: extractUserTitle(adm.user)//adm.user.username ? '@' + adm.user.username : (adm.user.first_name + ' ' + (adm.user.last_name || '')).trim()
                         }
                     });
                 };
@@ -149,10 +149,12 @@ bot.command('add_game', async (ctx) => {
     //}
 
     const creatorId = ctx.from.id;
-    const creatorName = (ctx.from.first_name + ' ' + (ctx.from.last_name || '')).trim();
-    if (args.length < 3) return ctx.reply(botCommands[cmdName].example);
+    const creatorName = extractUserTitle(ctx.from, false); //(ctx.from.first_name + ' ' + (ctx.from.last_name || '')).trim();
+    if (args.length < 3) return ctx.reply('Передана некоректа кількість параметрів. ' + botCommands[cmdName].example);
     let parsedDate = Date.parse(args[1]);
     if (!parsedDate) return ctx.reply('Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+    let maxPlayers = parseInt(args[2]);
+    if (!maxPlayers || maxPlayers <= 0) return ctx.reply('Кількість ігроків повинно бути числом більше 0.');
 
     const game = {
         chatId,
@@ -214,18 +216,23 @@ bot.action(/^decline_(.*)$/, async (ctx) => updateGameStatus(ctx, 'decline'));
 async function updateGameStatus(ctx, action) {
     const gameId = ctx.match[1];
     const userId = ctx.from.id;
-    const username = ctx.from.username ? '@' + ctx.from.username : (ctx.from.first_name + ' ' + (ctx.from.last_name || '')).trim();
+    const username = extractUserTitle(ctx.from);//ctx.from.username ? '@' + ctx.from.username : (ctx.from.first_name + ' ' + (ctx.from.last_name || '')).trim();
     const timestamp = new Date();//ctx.update.callback_query.date * 1000);
 
     const game = await gamesCollection().findOne({ _id: ObjectId.createFromHexString(gameId) });
     if (!game || !game.isActive) return;
 
-    game.players = game.players.filter(p => p.id !== userId);
+    const newStatus = getStatusByAction(action);
+    const playerInd = game.players.findIndex(p => p.id === userId);
+    if (playerInd >= 0) {
+        if (game.players[playerInd].status === newStatus) {
+            // status not changed
+            return;
+        }
+        game.players.splice(playerInd, 1);
+    }
 
-    if (action === 'join')    game.players.push({ id: userId, name: username, status: 'joined',   timestamp });
-    if (action === 'pending') game.players.push({ id: userId, name: username, status: 'pending',  timestamp });
-    if (action === 'decline') game.players.push({ id: userId, name: username, status: 'declined', timestamp });
-
+    game.players.push({ id: userId, name: username, status: newStatus, timestamp });
     game.players.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     await gamesCollection().updateOne({ _id: game._id }, { $set: { players: game.players } });
 
