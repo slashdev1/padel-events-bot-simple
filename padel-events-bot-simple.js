@@ -1,11 +1,15 @@
 const loadEnvConfig = require('./config');
 loadEnvConfig();
-const {str2params, date2int, date2text, getStatusByAction, textMarkdownNormalize, extractUserTitle} = require('./utils');
+const {str2params, isTrue, date2int, date2text, getStatusByAction, textMarkdownNormalize, extractUserTitle} = require('./utils');
 const cron = require('node-cron');
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
-const {express, updateExtra} = require('./express');
-express(process.env.PORT);
+let express, updateExtra;
+if (!isTrue(process.env.DO_NOT_USE_EXPRESS)) {
+    let {express, updateExtra} = require('./express');
+    express(process.env.PORT);
+} else
+    updateExtra = () => {};
 const botCommands = require('./commands-descriptions.json');
 const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
 const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
@@ -21,14 +25,22 @@ const start = async () => {
     db = mongoClient.db(dbName);
     console.log(`Connected to MongoDB (db ${dbName})`);
     superAdminId = (await globalSettingsCollection().findOne())?.superAdminId;
-    bot.launch(() => {
+    const config = {};
+    if (!isTrue(process.env.PADEL_BOT_USE_PULLING)) {
+        config.webhook = {
+            domain: process.env.PADEL_BOT_WEBHOOK_DOMAIN,
+            port: process.env.PADEL_BOT_WEBHOOK_PORT
+        };
+    }
+    bot.launch(config, () => {
         console.log('Bot is running!');
-        bot.telegram.getMe().then(data => {
+        //bot.telegram.getMe().then(data => {
+            data = bot.botInfo;
             botName = data.username;
             botUrl = `https://t.me/${botName}`;
             updateExtra({botName, botUrl});
             console.log(botName, botUrl);
-        });
+        //});
     });
 
     // Enable graceful stop

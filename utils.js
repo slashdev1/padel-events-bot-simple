@@ -10,6 +10,8 @@ const str2params = (str) => str/*.match(/\\?.|^$/g)*/.split('').reduce((p, c) =>
     return p;
 }, { a: [''] }).a;
 
+const isTrue = (str) => ['1', 'true', 'yes'].indexOf(str.toLowerCase()) >= 0;
+
 const date2int = (date) => (typeof date === 'string' ? Date.parse(date) : (date instanceof Date ? date.getTime() : +date)) || 0;
 
 const date2text = (date) => {
@@ -51,6 +53,7 @@ Date.prototype.endOfDay = function() {
 
 module.exports = {
     str2params,
+    isTrue,
     date2int,
     date2text,
     textMarkdownNormalize,
