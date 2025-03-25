@@ -32,6 +32,23 @@ const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_'
 
 const extractUserTitle = (user, useUserName) => user.username && useUserName !== false ? '@' + user.username : (user.first_name + ' ' + (user.last_name || '')).trim();
 
+Date.prototype.addDays = function(days) {
+    var date = new Date(this.valueOf());
+    date.setDate(date.getDate() + days);
+    return date;
+}
+
+Date.prototype.startOfDay = function() {
+    var date = new Date(this.valueOf());
+    date.setUTCHours(0,0,0,0);
+    return date;
+}
+Date.prototype.endOfDay = function() {
+    var date = new Date(this.valueOf());
+    date.setUTCHours(23,59,59,999);
+    return date;
+}
+
 module.exports = {
     str2params,
     date2int,

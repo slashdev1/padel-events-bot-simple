@@ -1,53 +1,19 @@
-/*const dotenv = require('dotenv');
-const env = process.env.NODE_ENV || 'development';
-switch (env) {
-    case 'development':
-        dotenv.config({ path: '.env.development' });
-        break;
-    case 'test':
-        dotenv.config({ path: '.env.test' });
-        break;
-    case 'staging':
-        dotenv.config({ path: '.env.staging' });
-        break;
-    case 'production':
-        dotenv.config({ path: '.env.production' });
-        break;
-    default:
-        throw new Error(`Unknown environment: ${env}`);
-}*/
 const loadEnvConfig = require('./config');
 loadEnvConfig();
-
 const {str2params, date2int, date2text, getStatusByAction, textMarkdownNormalize, extractUserTitle} = require('./utils');
 const cron = require('node-cron');
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
-/*const express = require('express');
-
-const app = express()
-const port = process.env.PORT;
-
-app.get('/', (req, res) => {
-    res.send(`Bot is running! Follow to ${botUrl}`);
-})
-
-app.listen(port, () => {
-    console.log(`Express app listening on port ${port}`);
-})*/
 const {express, updateExtra} = require('./express');
 express(process.env.PORT);
-
+const botCommands = require('./commands-descriptions.json');
 const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
 const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
 let db;
 //let superAdminId;
 let botName;
 let botUrl;
-const botCommands = /*{
-    'add_game': { description: 'Cтворює гру.', example: 'Вкажіть назву гри, дату та кількість гравців. Приклад: /add_game "Падел матч вт 19-21" 2025-03-25 8' },
-    'active_games': { description: 'Показує перелік активних ігор, на які записувався ігрок.' }
-};*/ require('./commands-descriptions.json');
+
 
 const start = async () => {
     await mongoClient.connect();
@@ -75,28 +41,6 @@ const usersCollection = () => db.collection('users');
 const globalSettingsCollection = () => db.collection('globalSettings');
 const chatSettingsCollection = () => db.collection('chatSettings');
 
-/*const str2params = (str) => str.match(/\\?.|^$/g).reduce((p, c) => {
-    if(c === '"'){
-        p.quote ^= 1;
-    }else if(!p.quote && c === ' '){
-        p.a.push('');
-    }else{
-        p.a[p.a.length-1] += c.replace(/\\(.)/,"$1");
-    }
-    return  p;
-}, {a: ['']}).a;
-
-const date2int = (date) => (typeof date === 'string' ? Date.parse(date) : (date instanceof Date ? date.getTime() : +date)) || 0;
-const date2text = (date) => {
-    let int = date2int(date);
-    if (!int) return '';
-    return new Date(int).toLocaleDateString('uk-UA', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    });
-};*/
-
 bot.command('start', async (ctx) => {
     const user = ctx.from;
     updateUser({...user, started: true, startedTimestamp: new Date()});
@@ -110,14 +54,13 @@ bot.command('start', async (ctx) => {
 });
 
 bot.command('help', async (ctx) => {
-    ctx.reply('👾 Список підтримуємих команд:\n' +
+    ctx.reply('👾 Список команд, що підтримуються:\n' +
         Object.keys(botCommands)
             .filter(key => botCommands[key].isDisplayable !== false)
             .map(key => {
                 let cmd = botCommands[key];
                 return `    /${key} - ${cmd.description} ${cmd.example || ''}`;
             }).join('\n') + botCommands['help'].extra || ''
-        //'\n\n💡 Користуватись ботом дуже просто:\n    1. Додайте бота до групи або каналу\n    2. І ось ви вже можете використовувати вишезазначені команди'
     );
 });
 
@@ -144,7 +87,7 @@ bot.command('add_game', async (ctx) => {
                     chatSettings.admins = admins.map(adm => {
                         return {
                             id: adm.user.id,
-                            name: extractUserTitle(adm.user)//adm.user.username ? '@' + adm.user.username : (adm.user.first_name + ' ' + (adm.user.last_name || '')).trim()
+                            name: extractUserTitle(adm.user)
                         }
                     });
                 };
@@ -164,7 +107,7 @@ bot.command('add_game', async (ctx) => {
     //}
 
     const creatorId = ctx.from.id;
-    const creatorName = extractUserTitle(ctx.from, false); //(ctx.from.first_name + ' ' + (ctx.from.last_name || '')).trim();
+    const creatorName = extractUserTitle(ctx.from, false);
     if (args.length < 3) return ctx.reply('Передана некоректа кількість параметрів. ' + botCommands[cmdName].example);
     let parsedDate = Date.parse(args[1]);
     if (!parsedDate) return ctx.reply('Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
@@ -216,11 +159,6 @@ bot.command('active_games', async (ctx) => {
             response = `📋 **Активні ігри${where}:**\n\n` + lines.map(elem => elem.text).join(`\n`);
         }
     }
-    /*try {
-        await bot.telegram.sendMessage(userId, response, { parse_mode: 'Markdown' });
-    } catch (error) {
-        ctx.reply(`Для отримання повідомлень від бота перейдіть на нього ${botUrl} та натисніть Start.`);
-    }*/
     replyToUser(ctx, response);
 });
 
@@ -264,9 +202,8 @@ const updateUser = (userData) => {
 
 async function updateGameStatus(ctx, action) {
     const [gameId, extraAction] = ctx.match[1].split('_');
-    //console.log('extraAction='+extraAction);
     const userId = ctx.from.id;
-    const username = extractUserTitle(ctx.from);//ctx.from.username ? '@' + ctx.from.username : (ctx.from.first_name + ' ' + (ctx.from.last_name || '')).trim();
+    const username = extractUserTitle(ctx.from);
     const timestamp = new Date();//ctx.update.callback_query.date * 1000);
 
     const game = await gamesCollection().findOne({ _id: ObjectId.createFromHexString(gameId) });
@@ -274,16 +211,14 @@ async function updateGameStatus(ctx, action) {
 
     const newStatus = getStatusByAction(action);
     let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer);
-    //console.log('playerInd='+playerInd);
     if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
         return ctx.reply('Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
     }
     let extraPlayer = game.players.length && Math.max(...game.players.map(elem => elem.extraPlayer)) || 0;
     if (extraAction) {
-        //extraPlayer = Math.max(...game.players.map(elem => elem.extraPlayer)) || 0;
         if (extraAction === 'minus') {
             if (extraPlayer <= 0) {
-                return// console.log('Не має кого видалять');
+                return;
             }
             playerInd = game.players.findIndex(p => p.id === userId && p.extraPlayer === extraPlayer);
             game.players.splice(playerInd, 1);
@@ -309,8 +244,6 @@ async function updateGameStatus(ctx, action) {
 
     updateGameMessage(game, gameId);
 }
-
-//const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_');
 
 const  buildTextMessage = (game) => {
     const players = game.players || [];
@@ -351,12 +284,29 @@ async function writeGameMessage(ctx, game, gameId) {
     return await ctx.reply(buildTextMessage(game), { parse_mode: 'Markdown', ...buildMarkup(gameId) });
 }
 
+const sendNotification = async (dateStart, dateEnd, whenText) => {
+    const games = await gamesCollection().find(
+        {isActive: true, date: {$gte: dateStart, $lte: dateEnd}}
+    ).toArray();
+    games.forEach(game =>
+        bot.telegram.sendMessage(game.chatId, `🔔 Нагадування\n\n${whenText} відбудеться гра ${game.name}.`, { reply_to_message_id: game.messageId})
+    );
+}
+
 cron.schedule('*/15 * * * *', () => {
     const date = new Date();
     gamesCollection().updateMany(
         { $and: [{isActive: true}, {date: {$lte : date}}] },
         { $set: { isActive: false } }
     ).then(res => res.modifiedCount && console.log(`Deactivated ${res.modifiedCount} tasks`));
+});
+
+cron.schedule('0 18 * * *', async () => {
+    sendNotification(new Date().addDays(1).startOfDay(), new Date().addDays(1).endOfDay(), 'Завтра');
+});
+
+cron.schedule('0 9 * * *', async () => {
+    sendNotification(new Date().startOfDay(), new Date().endOfDay(), 'Сьогодні');
 });
 
 start();
