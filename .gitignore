@@ -4,4 +4,4 @@ node_modules
 .env.*
 package-lock.json
 *.bak
-test.js
+test*.js

@@ -1,11 +1,12 @@
 const loadEnvConfig = require('./config');
 loadEnvConfig();
-const {str2params, isTrue, date2int, date2text, getStatusByAction, textMarkdownNormalize, extractUserTitle} = require('./utils');
+const {str2params, isTrue, date2int, date2text, parseDate, getStatusByAction, textMarkdownNormalize, extractUserTitle} = require('./utils');
 const cron = require('node-cron');
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
 const package = require('./package.json');
 const botCommands = require('./commands-descriptions.json');
+const emoji = require('./emoji.json');
 const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
 const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
 let db;
@@ -92,12 +93,12 @@ bot.command('help', async (ctx) => {
 });
 
 bot.command('ver', async (ctx) => {
-    replyToUser(ctx, package.version);
+    replyToUserDirectOrDoNothing(ctx, package.version);
 });
 
 bot.command('time', async (ctx) => {
     const now = new Date();
-    replyToUser(ctx, `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}`);
+    replyToUserDirectOrDoNothing(ctx, `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}`);
 });
 
 bot.command('add_game', async (ctx) => {
@@ -137,33 +138,40 @@ bot.command('add_game', async (ctx) => {
             else if (cmdPermission.appliesTo === 'admins') users = chatSettings.admins;
             else if (cmdPermission.appliesTo === 'users') users = cmdPermission.users;
             if (users && !users.some(usr => usr.id === ctx.from.id)) {
-                return ctx.reply('⚠️ У вас немає повноважень на використання цієї команди.');
+                return ctx.reply(emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
             };
         }
     //}
 
     const creatorId = ctx.from.id;
     const creatorName = extractUserTitle(ctx.from, false);
-    if (args.length < 3) return ctx.reply('Передана некоректа кількість параметрів. ' + botCommands[cmdName].example);
-    let parsedDate = Date.parse(args[1]);
-    if (!parsedDate) return ctx.reply('Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+    if (args.length < 3) return ctx.reply(emoji.warn + 'Передана некоректа кількість параметрів. ' + botCommands[cmdName].example);
+    const stringDate = args[1];
+    const parsedDate = parseDate(stringDate);
+    if (!parsedDate) return ctx.reply(emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
     let maxPlayers = parseInt(args[2]);
     if (!maxPlayers || maxPlayers <= 0) return ctx.reply('Кількість ігроків повинно бути числом більше 0.');
 
     const game = {
+        createdDate: new Date(),
+        createdById: creatorId,
+        createdByName: creatorName,
+        isActive: true,
         chatId,
-        creatorId,
-        creatorName,
+        creatorId, // deprecated in the nearest future
+        creatorName, // deprecated in the nearest future
         name: args[0],
         date: new Date(parsedDate),
+        isDateWithoutTime: stringDate.match(/\d+/g).length < 4, // minimal length for successfully converted date (e.g. "2025-03-01 9:")
         maxPlayers: parseInt(args[2]),
-        players: [],
-        isActive: true
+        players: []
     };
     const result = await gamesCollection().insertOne(game);
     const gameId = result.insertedId;
     const message = await writeGameMessage(ctx, game, gameId);
     await gamesCollection().updateOne({ _id: gameId }, { $set: { messageId: message.message_id } });
+    if (game.isDateWithoutTime)
+        replyToUserDirectOrDoNothing(ctx, emoji.warn + 'Для того щоб коректно нагадувати та деактивовувати ігри краще зазначати дату ігри разом з часом.');
 });
 
 bot.command('active_games', async (ctx) => {
@@ -210,7 +218,7 @@ const replyToUser = async (ctx, message) => {
         try {
             await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
         } catch (error) {
-            console.error(JSON.stringify(error));
+            //console.error(JSON.stringify(error));
             if (error?.code === 403) {
                 replyWarning(ctx);
                 updateUser({...ctx.from, started: false, startedTimestamp: new Date()});
@@ -221,8 +229,26 @@ const replyToUser = async (ctx, message) => {
         replyWarning(ctx);
 }
 
+const replyToUserDirectOrDoNothing = async (ctx, message) => {
+    const userId = ctx.from.id;
+    const user = await usersCollection().findOne({ userId });
+    let sent = false;
+    try {
+        await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
+        sent = true;
+    } catch (error) {
+        //console.error(JSON.stringify(error));
+        if (error?.code === 403) {
+            updateUser({...ctx.from, started: false, startedTimestamp: new Date()});
+            return;
+        }
+    }
+    if (sent && !user?.started) updateUser({...ctx.from, started: true, startedTimestamp: new Date()});
+}
+
 const updateUser = (userData) => {
     const fields = {};
+    //{...(quantity && { quantity })}
     if ('id' in userData)               fields.userId = userData.id;
     if ('started' in userData)          fields.started = userData.started;
     if ('startedTimestamp' in userData) fields.startedTimestamp = userData.startedTimestamp;

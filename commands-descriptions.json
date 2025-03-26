@@ -1,7 +1,7 @@
 {
     "start": {
         "isDisplayable": false,
-        "description": "Вітаю ${ctx.from.first_name}. Якщо потрібна допомога то використай команду /help"
+        "description": "Вітаю ${ctx.from.first_name}. Якщо потрібна допомога то використовуй команду /help"
     },
     "help": {
         "description": "Відображає список підтримуємих команд та додаткову інформацію",
