@@ -1,4 +1,8 @@
 {
+  "name": "padel-events-bot-simple",
+  "version": "0.3.326",
+  "description": "Padel Events Telegram Bot",
+  "license": "MIT",
   "dependencies": {
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

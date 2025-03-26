@@ -4,12 +4,6 @@ const {str2params, isTrue, date2int, date2text, getStatusByAction, textMarkdownN
 const cron = require('node-cron');
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
-let express, updateExtra;
-if (!isTrue(process.env.DO_NOT_USE_EXPRESS)) {
-    let {express, updateExtra} = require('./express');
-    express(process.env.PORT);
-} else
-    updateExtra = () => {};
 const botCommands = require('./commands-descriptions.json');
 const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
 const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
@@ -17,7 +11,7 @@ let db;
 //let superAdminId;
 let botName;
 let botUrl;
-
+let express, updateExtra;
 
 const start = async () => {
     await mongoClient.connect();
@@ -25,14 +19,12 @@ const start = async () => {
     db = mongoClient.db(dbName);
     console.log(`Connected to MongoDB (db ${dbName})`);
     superAdminId = (await globalSettingsCollection().findOne())?.superAdminId;
-    const config = {};
-    if (!isTrue(process.env.PADEL_BOT_USE_PULLING)) {
-        config.webhook = {
-            domain: process.env.PADEL_BOT_WEBHOOK_DOMAIN,
-            port: process.env.PADEL_BOT_WEBHOOK_PORT
-        };
-    }
-    bot.launch(config, () => {
+
+    // Enable graceful stop
+    process.once('SIGINT', () => bot.stop('SIGINT'));
+    process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+    const onLaunch = () => {
         console.log('Bot is running!');
         //bot.telegram.getMe().then(data => {
             data = bot.botInfo;
@@ -41,11 +33,32 @@ const start = async () => {
             updateExtra({botName, botUrl});
             console.log(botName, botUrl);
         //});
-    });
+    };
 
-    // Enable graceful stop
-    process.once('SIGINT', () => bot.stop('SIGINT'));
-    process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+    if (!isTrue(process.env.DO_NOT_USE_EXPRESS)) {
+        express = require('./express').express;
+        updateExtra = require('./express').updateExtra;
+        const app = express(process.env.PORT);
+        if (!isTrue(process.env.PADEL_BOT_USE_PULLING)) {
+            bot.botInfo = await bot.telegram.getMe();
+            onLaunch();
+            bot.webhookServer = null; // important to avoid: throw new Error('Bot is not running!');
+            app.use(await bot.createWebhook({ domain: process.env.PADEL_BOT_WEBHOOK_DOMAIN }));
+            return;
+        }
+    } else
+        updateExtra = () => {};
+
+
+    const config = {};
+    if (!isTrue(process.env.PADEL_BOT_USE_PULLING)) {
+        config.webhook = {
+            domain: process.env.PADEL_BOT_WEBHOOK_DOMAIN,
+            port: process.env.PADEL_BOT_WEBHOOK_PORT
+        };
+    }
+    bot.launch(config, onLaunch);
 };
 
 const gamesCollection = () => db.collection('games');
