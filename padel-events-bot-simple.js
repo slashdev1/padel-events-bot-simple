@@ -95,6 +95,11 @@ bot.command('ver', async (ctx) => {
     replyToUser(ctx, package.version);
 });
 
+bot.command('time', async (ctx) => {
+    const now = new Date();
+    replyToUser(ctx, `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}`);
+});
+
 bot.command('add_game', async (ctx) => {
     const chatId = ctx.chat.id;
     let [cmdName, ...args] = str2params(ctx.message.text);

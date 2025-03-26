@@ -40,6 +40,12 @@ Date.prototype.addDays = function(days) {
     return date;
 }
 
+Date.prototype.addMinutes = function(minutes) {
+    var date = new Date(this.valueOf());
+    date.setMinutes(date.getMinutes() + minutes);
+    return date;
+}
+
 Date.prototype.startOfDay = function() {
     var date = new Date(this.valueOf());
     date.setUTCHours(0,0,0,0);
