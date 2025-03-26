@@ -4,6 +4,7 @@ const {str2params, isTrue, date2int, date2text, getStatusByAction, textMarkdownN
 const cron = require('node-cron');
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
+const package = require('./package.json');
 const botCommands = require('./commands-descriptions.json');
 const bot = new Telegraf(process.env.PADEL_BOT_TOKEN);
 const mongoClient = new MongoClient(process.env.PADEL_MONGO_URI);
@@ -14,6 +15,7 @@ let botUrl;
 let express, updateExtra;
 
 const start = async () => {
+    console.log(`Date on server ${new Date()}`);
     await mongoClient.connect();
     const dbName = process.env.PADEL_DB_NAME;
     db = mongoClient.db(dbName);
@@ -87,6 +89,10 @@ bot.command('help', async (ctx) => {
                 return `    /${key} - ${cmd.description} ${cmd.example || ''}`;
             }).join('\n') + botCommands['help'].extra || ''
     );
+});
+
+bot.command('ver', async (ctx) => {
+    replyToUser(ctx, package.version);
 });
 
 bot.command('add_game', async (ctx) => {
@@ -330,7 +336,7 @@ cron.schedule('0 18 * * *', async () => {
     sendNotification(new Date().addDays(1).startOfDay(), new Date().addDays(1).endOfDay(), 'Завтра');
 });
 
-cron.schedule('0 9 * * *', async () => {
+cron.schedule('0 10 * * *', async () => {
     sendNotification(new Date().startOfDay(), new Date().endOfDay(), 'Сьогодні');
 });
 
