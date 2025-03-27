@@ -92,13 +92,18 @@ bot.command('help', async (ctx) => {
     );
 });
 
-bot.command('ver', async (ctx) => {
+bot.command('__ver', async (ctx) => {
     replyToUserDirectOrDoNothing(ctx, package.version);
 });
 
-bot.command('time', async (ctx) => {
+bot.command('__time', async (ctx) => {
     const now = new Date();
     replyToUserDirectOrDoNothing(ctx, `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}`);
+});
+
+bot.command('__send_to', async (ctx) => {
+    let [_, ...args] = str2params(ctx.message.text);
+    replyToUserDirectOrDoNothing({from: {id: parseInt(args[0])}}, args[1]);
 });
 
 bot.command('add_game', async (ctx) => {
@@ -363,11 +368,11 @@ cron.schedule('*/15 * * * *', () => {
     ).then(res => res.modifiedCount && console.log(`Deactivated ${res.modifiedCount} tasks`));
 });
 
-cron.schedule('0 18 * * *', async () => {
+cron.schedule('0 16 * * *', async () => {
     sendNotification(new Date().addDays(1).startOfDay(), new Date().addDays(1).endOfDay(), 'Завтра');
 });
 
-cron.schedule('0 10 * * *', async () => {
+cron.schedule('0 8 * * *', async () => {
     sendNotification(new Date().startOfDay(), new Date().endOfDay(), 'Сьогодні');
 });
 

@@ -1,3 +1,5 @@
+const { MongoClient, ObjectId } = require('mongodb');
+
 class Database {
     constructor(uri, dbName) {
         this.client = new MongoClient(uri);
@@ -10,13 +12,16 @@ class Database {
         this.db = this.client.db(this.dbName);
         console.log(`Connected to MongoDB (db ${this.dbName})`);
 
-        // Enable graceful stop
-        process.once('SIGINT', () => this.disconnect());
-        process.once('SIGTERM', () => this.disconnect());
+        this.enableGracefulStop();
+    }
+
+    enableGracefulStop() {
+        process.once('SIGINT', async () => await this.disconnect());
+        process.once('SIGTERM', async () => await this.disconnect());
     }
 
     async disconnect() {
-        await this.client.close();
+        await this.client.close(() => console.log(`Disconnected from MongoDB`));
     }
 
     // Collection getters
