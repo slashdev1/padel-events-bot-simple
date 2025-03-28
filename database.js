@@ -29,7 +29,7 @@ class Database {
     users() { return this.db.collection('users'); }
     globalSettings() { return this.db.collection('globalSettings'); }
     chatSettings() { return this.db.collection('chatSettings'); }
-/*
+
     // User operations
     async updateUser(userData) {
         const fields = {};
@@ -50,7 +50,7 @@ class Database {
     async findUser(userId) {
         return await this.users().findOne({ userId });
     }
-
+/*
     // Game operations
     async createGame(gameData) {
         return await this.games().insertOne(gameData);

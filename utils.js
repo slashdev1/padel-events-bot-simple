@@ -11,6 +11,7 @@ const str2params = (str) => str/*.match(/\\?.|^$/g)*/.split('').reduce((p, c) =>
 }, { a: [''] }).a;
 
 const isTrue = (str) => ['1', 'true', 'yes'].indexOf(str.toLowerCase()) >= 0;
+const isFalse = (str) => !isTrue(str);
 
 const date2int = (date) => (typeof date === 'string' ? Date.parse(date) : (date instanceof Date ? date.getTime() : +date)) || 0; // deprecated in the nearest future
 
@@ -73,8 +74,9 @@ Date.prototype.endOfDay = function() {
 }
 
 module.exports = {
-    str2params,
     isTrue,
+    isFalse,
+    str2params,
     date2int,
     date2text,
     parseDate,

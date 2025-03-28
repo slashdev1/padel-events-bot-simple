@@ -1,4 +1,4 @@
-require('./config')();
+require('./env')();
 const Database = require('./database');
 const Webserver = require('./webserver');
 const TGBot = require('./bot');
@@ -12,6 +12,7 @@ async function main() {
     );
     await database.connect();
 
+    // Initialize webserver
     let webserver;
     if (isTrue(process.env.USE_EXPRESS)) {
         webserver = new Webserver(process.env.PORT);
@@ -27,17 +28,8 @@ async function main() {
         process.env.PADEL_BOT_WEBHOOK_DOMAIN,
         process.env.PADEL_BOT_WEBHOOK_PORT
     );
-    //await bot.initialize();
 
-    // Start bot with appropriate config
-    // const config = {};
-    // if (!isTrue(process.env.PADEL_BOT_USE_PULLING)) {
-    //     config.webhook = {
-    //         domain: process.env.PADEL_BOT_WEBHOOK_DOMAIN,
-    //         port: process.env.PADEL_BOT_WEBHOOK_PORT
-    //     };
-    // }
-    await bot.start(/*config*/);
+    await bot.start();
 }
 
 main().catch(console.error);

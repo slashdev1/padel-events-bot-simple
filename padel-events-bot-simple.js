@@ -1,4 +1,4 @@
-const loadEnvConfig = require('./config');
+const loadEnvConfig = require('./env');
 loadEnvConfig();
 const {str2params, isTrue, date2int, date2text, parseDate, getStatusByAction, textMarkdownNormalize, extractUserTitle} = require('./utils');
 const cron = require('node-cron');
@@ -21,7 +21,8 @@ const start = async () => {
     const dbName = process.env.PADEL_DB_NAME;
     db = mongoClient.db(dbName);
     console.log(`Connected to MongoDB (db ${dbName})`);
-    superAdminId = (await globalSettingsCollection().findOne())?.superAdminId;
+
+    //superAdminId = (await globalSettingsCollection().findOne())?.superAdminId;
 
     // Enable graceful stop
     process.once('SIGINT', () => bot.stop('SIGINT'));
@@ -362,8 +363,10 @@ const sendNotification = async (dateStart, dateEnd, whenText) => {
 
 cron.schedule('*/15 * * * *', () => {
     const date = new Date();
+    const startOfDate = date.startOfDay();
+    const filter = { $and: [{isActive: true}, {$or: [{date: {$lte: date}, isDateWithoutTime: false}, {date: {$lt: startOfDate}, isDateWithoutTime: {$ne: false}}]}] };
     gamesCollection().updateMany(
-        { $and: [{isActive: true}, {date: {$lte : date}}] },
+        filter,
         { $set: { isActive: false } }
     ).then(res => res.modifiedCount && console.log(`Deactivated ${res.modifiedCount} tasks`));
 });
@@ -372,7 +375,7 @@ cron.schedule('0 16 * * *', async () => {
     sendNotification(new Date().addDays(1).startOfDay(), new Date().addDays(1).endOfDay(), 'Завтра');
 });
 
-cron.schedule('0 8 * * *', async () => {
+cron.schedule('40 8 * * *', async () => {
     sendNotification(new Date().startOfDay(), new Date().endOfDay(), 'Сьогодні');
 });
 
