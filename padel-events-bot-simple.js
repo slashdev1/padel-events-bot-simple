@@ -39,8 +39,26 @@ const start = async () => {
         //});
     };
 
-
-    if (!isTrue(process.env.DO_NOT_USE_EXPRESS)) {
+    const config = {
+        allowed_updates: [
+            'update_id',
+            'message',
+            'edited_message',
+            'channel_post',
+            'edited_channel_post',
+            'inline_query',
+            'chosen_inline_result',
+            'callback_query',
+            'shipping_query',
+            'pre_checkout_query',
+            'poll',
+            'poll_answer',
+            'my_chat_member',
+            'chat_member',
+            'chat_join_request',
+        ]
+    }
+    if (isTrue(process.env.USE_EXPRESS)) {
         express = require('./express').express;
         updateExtra = require('./express').updateExtra;
         const app = express(process.env.PORT);
@@ -48,14 +66,14 @@ const start = async () => {
             bot.botInfo = await bot.telegram.getMe();
             onLaunch();
             bot.webhookServer = null; // important to avoid: throw new Error('Bot is not running!');
-            app.use(await bot.createWebhook({ domain: process.env.PADEL_BOT_WEBHOOK_DOMAIN }));
+            config.domain = process.env.PADEL_BOT_WEBHOOK_DOMAIN;
+            app.use(await bot.createWebhook(config));
             return;
         }
     } else
         updateExtra = () => {};
 
 
-    const config = {};
     if (!isTrue(process.env.PADEL_BOT_USE_PULLING)) {
         config.webhook = {
             domain: process.env.PADEL_BOT_WEBHOOK_DOMAIN,
@@ -282,7 +300,7 @@ async function updateGameStatus(ctx, action) {
     if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
         return ctx.reply('Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
     }
-    let extraPlayer = game.players.length && Math.max(...game.players.map(elem => elem.extraPlayer)) || 0;
+    let extraPlayer = game.players.length && Math.max(...game.players.map(p => p.id === userId && p.extraPlayer)) || 0;
     if (extraAction) {
         if (extraAction === 'minus') {
             if (extraPlayer <= 0) {
