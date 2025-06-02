@@ -370,9 +370,9 @@ async function writeGameMessage(ctx, game, gameId) {
     return await ctx.reply(buildTextMessage(game), { parse_mode: 'Markdown', ...buildMarkup(gameId) });
 }
 
-const sendNotification = async (dateStart, dateEnd, whenText) => {
+const sendNotification = async (dateStart, dateEnd, whenText, onlyIfDateWithTime) => {
     const games = await gamesCollection().find(
-        {isActive: true, date: {$gte: dateStart, $lte: dateEnd}}
+        {isActive: true, date: {$gte: dateStart, $lte: dateEnd}, ...(onlyIfDateWithTime && { isDateWithoutTime: false })}
     ).toArray();
     games.forEach(game =>
         bot.telegram.sendMessage(game.chatId, `🔔 Нагадування\n\n${whenText} відбудеться гра ${game.name}.`, { reply_to_message_id: game.messageId})
@@ -393,8 +393,8 @@ cron.schedule('0 16 * * *', async () => {
     sendNotification(new Date().addDays(1).startOfDay(), new Date().addDays(1).endOfDay(), 'Завтра');
 });
 
-cron.schedule('40 8 * * *', async () => {
-    sendNotification(new Date().startOfDay(), new Date().endOfDay(), 'Сьогодні');
+cron.schedule('00 6 * * *', async () => {
+    sendNotification(new Date().startOfDay(), new Date().endOfDay(), 'Сьогодні', true);
 });
 
 start();
