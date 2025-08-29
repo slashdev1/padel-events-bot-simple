@@ -194,8 +194,29 @@ bot.command('add_game', async (ctx) => {
     const gameId = result.insertedId;
     const message = await writeGameMessage(ctx, game, gameId);
     await gamesCollection().updateOne({ _id: gameId }, { $set: { messageId: message.message_id } });
-    if (game.isDateWithoutTime)
-        replyToUserDirectOrDoNothing(ctx, emoji.warn + 'Для того щоб коректно нагадувати та деактивовувати ігри краще зазначати дату ігри разом з часом.');
+    const replyText = `Ви щойно створили гру "${args[0]}" (id=${gameId}).` + (game.isDateWithoutTime ? '\n\n' + emoji.warn + 'Для того щоб коректно нагадувати та деактивовувати ігри краще зазначати дату ігри разом з часом.' : '');
+    replyToUserDirectOrDoNothing(ctx, replyText);
+});
+
+bot.command('del_game', async (ctx) => {
+    let [_, ...args] = str2params(ctx.message.text);
+    const gameId = args[0];
+    const game = await gamesCollection().findOne({ _id: ObjectId.createFromHexString(gameId) });
+    if (!game || !game.isActive) return;
+    await gamesCollection().updateOne({ _id: game._id }, { $set: { isActive: false } });
+    try {
+        await bot.telegram.deleteMessage(game.chatId, game.messageId);
+    } catch (error) {
+        //console.error(JSON.stringify(error));
+        if (error?.code === 400) {
+            // message to delete not found
+            //replyWarning(ctx);
+            //updateUser({...ctx.from, started: false, startedTimestamp: new Date()});
+        } else
+            ctx.reply(message);
+    }
+    const replyText = `Ви щойно видалили гру "${game.name}" (id=${gameId}).`
+    replyToUserDirectOrDoNothing(ctx, replyText);
 });
 
 bot.command('active_games', async (ctx) => {
