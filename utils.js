@@ -10,6 +10,35 @@ const str2params = (str) => str/*.match(/\\?.|^$/g)*/.split('').reduce((p, c) =>
     return p;
 }, { a: [''] }).a;
 
+/** Function that count occurrences of a substring in a string;
+ * @param {String} string               The string
+ * @param {String} subString            The sub string to search for
+ * @param {Boolean} [allowOverlapping]  Optional. (Default:false)
+ *
+ * @author Vitim.us https://gist.github.com/victornpb/7736865
+ * @see Unit Test https://jsfiddle.net/Victornpb/5axuh96u/
+ * @see https://stackoverflow.com/a/7924240/938822
+ */
+function occurrences(string, subString, allowOverlapping) {
+
+    string += "";
+    subString += "";
+    if (subString.length <= 0) return (string.length + 1);
+
+    var n = 0,
+        pos = 0,
+        step = allowOverlapping ? 1 : subString.length;
+
+    while (true) {
+        pos = string.indexOf(subString, pos);
+        if (pos >= 0) {
+            ++n;
+            pos += step;
+        } else break;
+    }
+    return n;
+}
+
 const isTrue = (str) => ['1', 'true', 'yes'].indexOf(str.toLowerCase()) >= 0;
 const isFalse = (str) => !isTrue(str);
 
@@ -29,7 +58,7 @@ const parseDate = (str) => {
     let stringDate = str;
     let parsedDate = Date.parse(stringDate);
     const partsDate = stringDate.match(/\d+/g);
-    if (!parsedDate && partsDate.length >= 4 && stringDate.indexOf(':') == -1) {
+    if (!parsedDate && partsDate && partsDate.length >= 4 && stringDate.indexOf(':') == -1) {
         // allowed type date without last ":"
         // Date.parse('2025.03.01.9:') - unpredictably its correct format, also those are Date.parse('2025/03/01/9:') Date.parse('2025 03 01 9:')
         // but not Date.parse('2025-03-01-9:')
@@ -82,5 +111,6 @@ module.exports = {
     parseDate,
     textMarkdownNormalize,
     getStatusByAction,
-    extractUserTitle
+    extractUserTitle,
+    occurrences
 };

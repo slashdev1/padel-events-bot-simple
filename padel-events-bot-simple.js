@@ -1,6 +1,6 @@
 const loadEnvConfig = require('./env');
 loadEnvConfig();
-const {str2params, isTrue, date2int, date2text, parseDate, getStatusByAction, textMarkdownNormalize, extractUserTitle} = require('./utils');
+const {str2params, isTrue, date2int, date2text, parseDate, getStatusByAction, textMarkdownNormalize, extractUserTitle, occurrences} = require('./utils');
 const cron = require('node-cron');
 const { Telegraf, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
@@ -129,6 +129,15 @@ bot.command('add_game', async (ctx) => {
     const chatId = ctx.chat.id;
     let [cmdName, ...args] = str2params(ctx.message.text);
     cmdName = cmdName.slice(1);
+
+    if (args.length < 3) return ctx.reply(emoji.warn + 'Передана недостатня кількість параметрів. ' + botCommands[cmdName].example);
+    if (args.length > 3) return ctx.reply(emoji.warn + 'Передана некоректа кількість параметрів. ' + (occurrences(ctx.message.text, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '') + botCommands[cmdName].example);
+    const stringDate = args[1];
+    const parsedDate = parseDate(stringDate);
+    if (!parsedDate) return ctx.reply(emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+    let maxPlayers = parseInt(args[2]);
+    if (!maxPlayers || maxPlayers <= 0) return ctx.reply('Кількість ігроків повинно бути числом більше 0.');
+
     //if (superAdminId !== ctx.from.id) {
         let chatSettings = await chatSettingsCollection().findOne({ chatId });
         if (!chatSettings) {
@@ -169,12 +178,6 @@ bot.command('add_game', async (ctx) => {
 
     const creatorId = ctx.from.id;
     const creatorName = extractUserTitle(ctx.from, false);
-    if (args.length < 3) return ctx.reply(emoji.warn + 'Передана некоректа кількість параметрів. ' + botCommands[cmdName].example);
-    const stringDate = args[1];
-    const parsedDate = parseDate(stringDate);
-    if (!parsedDate) return ctx.reply(emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
-    let maxPlayers = parseInt(args[2]);
-    if (!maxPlayers || maxPlayers <= 0) return ctx.reply('Кількість ігроків повинно бути числом більше 0.');
 
     const game = {
         createdDate: new Date(),
