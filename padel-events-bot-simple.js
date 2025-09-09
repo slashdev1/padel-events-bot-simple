@@ -398,9 +398,15 @@ const sendNotification = async (dateStart, dateEnd, whenText, onlyIfDateWithTime
     const games = await gamesCollection().find(
         {isActive: true, date: {$gte: dateStart, $lte: dateEnd}, ...(onlyIfDateWithTime && { isDateWithoutTime: false })}
     ).toArray();
-    games.forEach(game =>
-        bot.telegram.sendMessage(game.chatId, `🔔 Нагадування\n\n${whenText} відбудеться гра ${game.name}.`, { reply_to_message_id: game.messageId})
-    );
+    games.forEach(async (game) => {
+        let replyText = `🔔 Нагадування\n\n${whenText} відбудеться гра ${game.name}.`;
+        try {
+            await bot.telegram.sendMessage(game.chatId, replyText, { reply_to_message_id: game.messageId });
+        } catch (error) {
+            if (error?.code === 400) //400: Bad Request: message to be replied not found
+                bot.telegram.sendMessage(game.chatId, replyText);
+        }
+    });
 }
 
 cron.schedule('*/15 * * * *', () => {

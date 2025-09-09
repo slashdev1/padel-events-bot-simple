@@ -3,6 +3,12 @@
   "version": "0.5.904",
   "description": "Padel Events Telegram Bot",
   "license": "MIT",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node app.js",
+    "legacy": "node padel-events-bot-simple.js"
+  },
   "dependencies": {
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
