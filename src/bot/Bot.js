@@ -29,12 +29,13 @@ class Bot {
     setupCommands() {
         this.bot.command('start', this.handleStart.bind(this));
         this.bot.command('help', this.handleHelp.bind(this));
-        this.bot.command('__ver', this.handleVersion.bind(this));
-        this.bot.command('__time', this.handleTime.bind(this));
-        this.bot.command('__send_to', this.handleSendTo.bind(this));
         this.bot.command('add_game', this.handleAddGame.bind(this));
         this.bot.command('del_game', this.handleDelGame.bind(this));
         this.bot.command('active_games', this.handleActiveGames.bind(this));
+        this.bot.command('__ver', this.handleGetVersion.bind(this));
+        this.bot.command('__time', this.handleTime.bind(this));
+        this.bot.command('__send_to', this.handleSendTo.bind(this));
+        this.bot.command('__adm', this.handleGetAdm.bind(this));
     }
 
     setupActions() {
@@ -66,7 +67,7 @@ class Bot {
         );
     }
 
-    async handleVersion(ctx) {
+    async handleGetVersion(ctx) {
         this.replyToUserDirectOrDoNothing(ctx, this.package.version);
     }
 
@@ -78,6 +79,10 @@ class Bot {
     async handleSendTo(ctx) {
         let [_, ...args] = str2params(ctx.message.text);
         this.replyToUserDirectOrDoNothing({from: {id: parseInt(args[0])}}, args[1]);
+    }
+
+    async handleGetAdm(ctx) {
+        this.replyToUserDirectOrDoNothing(ctx, String((await this.database.getGlobalSettings())?.superAdminId));
     }
 
     async handleAddGame(ctx) {

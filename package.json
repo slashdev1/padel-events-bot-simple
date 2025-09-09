@@ -1,13 +1,12 @@
 {
   "name": "padel-events-bot-simple",
-  "version": "0.5.904",
+  "version": "0.6.909",
   "description": "Padel Events Telegram Bot",
   "license": "MIT",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "node app.js",
-    "legacy": "node padel-events-bot-simple.js"
+    "dev": "node app.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

@@ -1,4 +1,5 @@
 const { MongoClient, ObjectId } = require('mongodb');
+const Cache = require('../cache/Cache');
 
 class Database {
     constructor(mongoUri, dbName) {
@@ -6,6 +7,17 @@ class Database {
         this.dbName = dbName;
         this.client = new MongoClient(mongoUri);
         this.db = null;
+
+        // Generic TTL cache for database lookups
+        this.cache = new Cache({
+            defaultTtlMs: process.env.CACHE_DEFAULT_TTL_MS,
+            cleanupIntervalMs: process.env.CACHE_CLEANUP_INTERVAL_MS
+        });
+
+        // Optional per-key TTL overrides
+        const defaultTtlMs = 60 * 1000;
+        this.ttlChatSettingsMs = Number(process.env.CACHE_TTL_CHAT_SETTINGS_MS || defaultTtlMs);
+        this.ttlGlobalSettingsMs = Number(process.env.CACHE_TTL_GLOBAL_SETTINGS_MS || defaultTtlMs);
     }
 
     async connect() {
@@ -122,16 +134,31 @@ class Database {
 
     // Chat settings operations
     async getChatSettings(chatId) {
-        return await this.chatSettingsCollection().findOne({ chatId });
+        const cacheKey = `chatSettings:${chatId}`;
+        return await this.cache.getOrSet(
+            cacheKey,
+            async () => await this.chatSettingsCollection().findOne({ chatId }),
+            this.ttlChatSettingsMs
+        );
     }
 
     async createChatSettings(chatSettings) {
-        return await this.chatSettingsCollection().insertOne(chatSettings);
+        const result = await this.chatSettingsCollection().insertOne(chatSettings);
+        if (chatSettings && chatSettings.chatId != null) {
+            const cacheKey = `chatSettings:${chatSettings.chatId}`;
+            this.cache.set(cacheKey, chatSettings, this.ttlChatSettingsMs);
+        }
+        return result;
     }
 
     // Global settings operations
     async getGlobalSettings() {
-        return await this.globalSettingsCollection().findOne();
+        const cacheKey = 'globalSettings';
+        return await this.cache.getOrSet(
+            cacheKey,
+            async () => await this.globalSettingsCollection().findOne(),
+            this.ttlGlobalSettingsMs
+        );
     }
 }
 
