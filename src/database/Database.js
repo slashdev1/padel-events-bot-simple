@@ -47,19 +47,19 @@ class Database {
     }
 
     async getGame(gameId) {
-        return await this.gamesCollection().findOne({ _id: ObjectId.createFromHexString(gameId) });
+        return await this.gamesCollection().findOne({ _id: this._id(gameId) });
     }
 
     async updateGame(gameId, updateData) {
         return await this.gamesCollection().updateOne(
-            { _id: this._id(gameId)}, 
+            { _id: this._id(gameId)},
             { $set: updateData }
         );
     }
 
     async deactivateGame(gameId) {
         return await this.gamesCollection().updateOne(
-            { _id: ObjectId.createFromHexString(gameId) }, 
+            { _id: this._id(gameId) },
             { $set: { isActive: false } }
         );
     }
@@ -71,18 +71,18 @@ class Database {
     async deactivateExpiredGames() {
         const date = new Date();
         const startOfDate = date.startOfDay();
-        const filter = { 
+        const filter = {
             $and: [
-                { isActive: true }, 
-                { 
+                { isActive: true },
+                {
                     $or: [
-                        { date: { $lte: date }, isDateWithoutTime: false }, 
+                        { date: { $lte: date }, isDateWithoutTime: false },
                         { date: { $lt: startOfDate }, isDateWithoutTime: { $ne: false } }
                     ]
                 }
-            ] 
+            ]
         };
-        
+
         const result = await this.gamesCollection().updateMany(filter, { $set: { isActive: false } });
         if (result.modifiedCount) {
             console.log(`Deactivated ${result.modifiedCount} games`);
@@ -136,3 +136,4 @@ class Database {
 }
 
 module.exports = Database;
+
