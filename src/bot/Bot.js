@@ -227,7 +227,7 @@ class Bot {
         const newStatus = getStatusByAction(action);
         let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer);
         if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
-            return ctx.reply('Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
+            return this.replyToUser(ctx, 'Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
         }
         let extraPlayer = game.players.length && Math.max(...game.players.map(p => p.id === userId && p.extraPlayer)) || 0;
         if (extraAction) {
@@ -245,7 +245,7 @@ class Bot {
                     return;
                 }
                 if (extraPlayer > 0) {
-                    return ctx.reply('Перед тим як змінювати свій статус видмініть похід на гру для додаткових ігроків, яких ви залучили.');
+                    return this.replyToUser(ctx, 'Перед тим як змінювати свій статус видмініть похід на гру для додаткових ігроків, яких ви залучили.');
                 }
                 game.players.splice(playerInd, 1);
             }

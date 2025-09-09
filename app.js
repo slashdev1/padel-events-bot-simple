@@ -41,7 +41,7 @@ class PadelBotApp {
 
     async launchBot() {
         const onLaunch = () => {
-            console.log('Bot is running!');
+            console.log(`Bot is running in ${this.config.usePolling ? 'polling' : 'webhook'} mode!`);
             const data = this.bot.botInfo;
             this.bot.setBotInfo(data.username, `https://t.me/${data.username}`);
             console.log(data.username, `https://t.me/${data.username}`);

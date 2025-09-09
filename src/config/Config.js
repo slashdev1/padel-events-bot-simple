@@ -77,7 +77,7 @@ class Config {
     }
 
     get webhookConfig() {
-        if (this.usePolling) {
+        if (!this.usePolling) {
             return {
                 domain: this.webhookDomain,
                 port: this.webhookPort
