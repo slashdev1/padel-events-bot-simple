@@ -83,11 +83,31 @@ class Config {
                 port: this.webhookPort
             };
         }
-        return {
+        /* return {
             domain: this.webhookDomain
-        };
+        };*/
+        return null;
+    }
+
+    get cacheDefaultTTL() {
+        return process.env.CACHE_DEFAULT_TTL_MS;
+    }
+
+    get cacheCleanupInterval() {
+        return process.env.CACHE_CLEANUP_INTERVAL_MS;
+    }
+
+    get cacheTtlChatSettings() {
+        return process.env.CACHE_TTL_CHAT_SETTINGS_MS;
+    }
+
+    get cacheTtlGlobalSettings() {
+        return process.env.CACHE_TTL_GLOBAL_SETTINGS_MS;
+    }
+
+    get cacheTtlUserData() {
+        return process.env.CACHE_TTL_USER_DATA_MS;
     }
 }
 
 module.exports = Config;
-

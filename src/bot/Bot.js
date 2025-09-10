@@ -1,5 +1,4 @@
 const { Telegraf, Markup } = require('telegraf');
-const { ObjectId } = require('mongodb');
 const { 
     str2params, 
     date2int, 
@@ -24,6 +23,7 @@ class Bot {
         
         this.setupCommands();
         this.setupActions();
+        this.setupMyChatMember();
     }
 
     setupCommands() {
@@ -44,6 +44,22 @@ class Bot {
         this.bot.action(/^decline_(.*)$/, (ctx) => this.updateGameStatus(ctx, 'decline'));
     }
 
+    setupMyChatMember() {
+        this.bot.on('my_chat_member', (ctx) => {
+            const newStatus = ctx.update.my_chat_member.new_chat_member.status;
+            const chatId = ctx.update.my_chat_member.chat.id;
+          
+            if (newStatus === 'kicked' || newStatus === 'left') {
+                console.log(`Бот вилучений з чату ${chatId}`);
+                this.database.updateChatSettings({ chatId, botStatus: newStatus });
+            } else if (newStatus === 'member') {
+                console.log(`Бот доданий до чату ${chatId}`);
+                this.database.updateChatSettings({ chatId, botStatus: newStatus }, async () => await this.makeChatSettings(chatId, ctx));
+                this.replyOrDoNothing(ctx, 'Привіт! Дякую за додавання мене до групи.');
+            }
+        });
+    }
+
     async handleStart(ctx) {
         const user = ctx.from;
         await this.database.updateUser({...user, started: true, startedTimestamp: new Date()});
@@ -53,11 +69,11 @@ class Bot {
         if (ctx.chat.id < 0)
             this.bot.telegram.sendMessage(user.id, tpl, { parse_mode: 'Markdown' });
         else
-            ctx.reply(tpl);
+            this.replyOrDoNothing(ctx, tpl);
     }
 
     async handleHelp(ctx) {
-        ctx.reply('👾 Список команд, що підтримуються:\n' +
+        this.replyOrDoNothing(ctx, '👾 Список команд, що підтримуються:\n' +
             Object.keys(this.botCommands)
                 .filter(key => this.botCommands[key].isDisplayable !== false)
                 .map(key => {
@@ -77,7 +93,15 @@ class Bot {
     }
 
     async handleSendTo(ctx) {
-        let [_, ...args] = str2params(ctx.message.text);
+        if (!await this.isSuperAdmin(ctx.from.id)) return;
+        // const chatId = ctx.chat.id;
+        let [cmdName, ...args] = str2params(ctx.message.text);
+        // let chatSettings = await this.database.getChatSettings(chatId);
+        // if (!chatSettings) {
+        //     chatSettings = await this.makeChatSettings(chatId, ctx);
+        //     await this.database.createChatSettings(chatSettings);
+        // }
+        // if (!this.hasPermission(chatSettings, cmdName, ctx.from.id)) return;
         this.replyToUserDirectOrDoNothing({from: {id: parseInt(args[0])}}, args[1]);
     }
 
@@ -87,55 +111,30 @@ class Bot {
 
     async handleAddGame(ctx) {
         const chatId = ctx.chat.id;
+        if (!(chatId < 0)) {
+            return this.replyToUserDirectOrDoNothing(ctx, this.emoji.err + 'Ця команда доступна тільки для груп!');
+        }
         let [cmdName, ...args] = str2params(ctx.message.text);
         cmdName = cmdName.slice(1);
 
-        if (args.length < 3) return ctx.reply(this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
-        if (args.length > 3) return ctx.reply(this.emoji.warn + 'Передана некоректа кількість параметрів. ' + (occurrences(ctx.message.text, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '') + this.botCommands[cmdName].example);
+        if (args.length < 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
+        if (args.length > 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана некоректа кількість параметрів. ' + (occurrences(ctx.message.text, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '') + this.botCommands[cmdName].example);
         
         const stringDate = args[1];
         const parsedDate = parseDate(stringDate);
-        if (!parsedDate) return ctx.reply(this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+        if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
         
         let maxPlayers = parseInt(args[2]);
-        if (!maxPlayers || maxPlayers <= 0) return ctx.reply('Кількість ігроків повинно бути числом більше 0.');
+        if (!maxPlayers || maxPlayers <= 0) return this.replyOrDoNothing(ctx, 'Кількість ігроків повинно бути числом більше 0.');
 
         let chatSettings = await this.database.getChatSettings(chatId);
         if (!chatSettings) {
-            chatSettings = {
-                chatId,
-                chatName: ctx.chat.title,
-                allMembersAreAdministrators: ctx.chat.all_members_are_administrators,
-                level: 'free',
-                reminders: [],
-                admins: [],
-                permissions: [],
-                features: []
-            }
-            if (!chatSettings.allMembersAreAdministrators) {
-                const admins = await this.bot.telegram.getChatAdministrators(chatId);
-                if (admins && admins.length) {
-                    chatSettings.admins = admins.map(adm => {
-                        return {
-                            id: adm.user.id,
-                            name: extractUserTitle(adm.user)
-                        }
-                    });
-                }
-            }
+            chatSettings = await this.makeChatSettings(chatId, ctx);
             await this.database.createChatSettings(chatSettings);
         }
         
-        const cmdPermission = chatSettings.permissions.find(elem => elem.command === cmdName);
-        if (cmdPermission) {
-            let users = [];
-            if      (cmdPermission.appliesTo === 'all') users = undefined;
-            else if (cmdPermission.appliesTo === 'admins') users = chatSettings.admins;
-            else if (cmdPermission.appliesTo === 'users') users = cmdPermission.users;
-            if (users && !users.some(usr => usr.id === ctx.from.id)) {
-                return ctx.reply(this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
-            }
-        }
+        if (!this.hasPermission(chatSettings, cmdName, ctx.from.id))
+            return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
 
         const creatorId = ctx.from.id;
         const creatorName = extractUserTitle(ctx.from, false);
@@ -164,10 +163,22 @@ class Bot {
     }
 
     async handleDelGame(ctx) {
-        let [_, ...args] = str2params(ctx.message.text);
+        // Важливо: ця команда може запускатись не з групи а напряму боту, тому айді чата береться з гри
+        let [cmdName, ...args] = str2params(ctx.message.text);
         const gameId = args[0];
         const game = await this.database.getGame(gameId);
         if (!game || !game.isActive) return;
+        
+        const chatId = game.chatId;
+        if (!await this.isSuperAdmin(ctx.from.id)) {
+            let chatSettings = await this.database.getChatSettings(chatId);
+            if (!chatSettings && ctx.chat.id < 0) {
+                chatSettings = await this.makeChatSettings(chatId, ctx);
+                await this.database.createChatSettings(chatSettings);
+            }
+            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id)) 
+                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
+        }
         
         await this.database.deactivateGame(gameId);
         try {
@@ -176,7 +187,7 @@ class Bot {
             if (error?.code === 400) {
                 // message to delete not found
             } else
-                ctx.reply(message);
+                this.replyOrDoNothing(ctx, message);
         }
         const replyText = `Ви щойно видалили гру "${game.name}" (id=${gameId}).`
         this.replyToUserDirectOrDoNothing(ctx, replyText);
@@ -199,13 +210,14 @@ class Bot {
             games.forEach(game => {
                 let gameDate = date2int(game.date);
                 if (gameDate && gameDate + 86400000 < Date.now()) return;
-                let status = ' Ще не має статусу';
+                let status = (chatId < 0) ? ' Ще не має статусу' : '';
                 let ind = game.players.filter(p => p.status === 'joined').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).findIndex(p => p.id === userId);
                 if (ind >= 0 && ind < game.maxPlayers) status = '✅ Йду';
                 if (ind >= 0 && ind >= game.maxPlayers) status = '⏳ У черзі';
                 if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
                 if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
-                lines.push({gameDate, text: `📅 **${game.name} (${date2text(game.date)})** - ${status}`});
+                if (status)
+                    lines.push({gameDate, text: `📅 **${game.name} (${date2text(game.date)})** - ${status}`});
             });
             if (lines.length) {
                 lines.sort((a, b) => (a.gameDate || 0) - (b.gameDate || 0));
@@ -302,11 +314,11 @@ class Bot {
 
     async writeGameMessage(ctx, game, gameId) {
         if (!game) return;
-        return await ctx.reply(this.buildTextMessage(game), { parse_mode: 'Markdown', ...this.buildMarkup(gameId) });
+        return await this.replyOrDoNothing(ctx, this.buildTextMessage(game), { parse_mode: 'Markdown', ...this.buildMarkup(gameId) });
     }
 
     async replyToUser(ctx, message) {
-        const replyWarning = (ctx) => ctx.reply(`Для отримання повідомлень від бота перейдіть на нього ${this.botUrl} та натисніть Start.`);
+        const replyWarning = (ctx) => this.replyOrDoNothing(ctx, `Для отримання повідомлень від бота перейдіть на нього ${this.botUrl} та натисніть Start.`);
         const userId = ctx.from.id;
         const user = await this.database.getUser(userId);
         if (user && user.started) {
@@ -317,7 +329,7 @@ class Bot {
                     replyWarning(ctx);
                     await this.database.updateUser({...ctx.from, started: false, startedTimestamp: new Date()});
                 } else
-                    ctx.reply(message);
+                    this.replyOrDoNothing(ctx, message);
             }
         } else
             replyWarning(ctx);
@@ -335,8 +347,17 @@ class Bot {
                 await this.database.updateUser({...ctx.from, started: false, startedTimestamp: new Date()});
                 return;
             }
+            console.error(error);
         }
         if (sent && !user?.started) await this.database.updateUser({...ctx.from, started: true, startedTimestamp: new Date()});
+    }
+
+    async replyOrDoNothing(ctx, message, extra) {
+        try {
+            return await ctx.reply(message, extra);
+        } catch (error) {
+            console.error(error);
+        }
     }
 
     async sendMessage(chatId, message, options = {}) {
@@ -381,6 +402,51 @@ class Bot {
         if (this.webServer) {
             this.webServer.updateExtra({ botName, botUrl });
         }
+    }
+
+    async makeChatSettings(chatId, ctx) {
+        const chatSettings = {
+            chatId,
+            chatName: ctx.chat.title,
+            allMembersAreAdministrators: ctx.chat.all_members_are_administrators,
+            level: 'free', // deprecated
+            license: 'free',
+            botStatus: 'unknown',
+            reminders: [],
+            admins: [],
+            permissions: [],
+            features: []
+        }
+        if (!chatSettings.allMembersAreAdministrators) {
+            const admins = await this.bot.telegram.getChatAdministrators(chatId);
+            if (admins && admins.length) {
+                chatSettings.admins = admins.map(adm => {
+                    return {
+                        id: adm.user.id,
+                        name: extractUserTitle(adm.user)
+                    }
+                });
+            }
+        }
+        return chatSettings;
+    }
+
+    hasPermission(chatSettings, cmdName, userId) {
+        const cmdPermission = chatSettings.permissions.find(elem => elem.command === cmdName);
+        if (cmdPermission) {
+            let users = [];
+            if      (cmdPermission.appliesTo === 'all') users = undefined;
+            else if (cmdPermission.appliesTo === 'admins') users = chatSettings.admins;
+            else if (cmdPermission.appliesTo === 'users') users = cmdPermission.users;
+            if (users && !users.some(usr => usr.id === userId)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    async isSuperAdmin(userId) {
+        return (await this.database.getGlobalSettings())?.superAdminId == userId;
     }
 }
 

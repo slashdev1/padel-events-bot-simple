@@ -1,8 +1,12 @@
+const Config = require('../config/Config');
+
 class Cache {
     constructor(options = {}) {
-        const defaultTtlMs = Number(options.defaultTtlMs || process.env.CACHE_DEFAULT_TTL_MS || 60_000);
+        const config = new Config();
+        const defaultTtlMs = Number(options.defaultTtlMs || config.cacheDefaultTTL);
         this.defaultTtlMs = isNaN(defaultTtlMs) ? 60_000 : defaultTtlMs;
-        this.cleanupIntervalMs = Number(options.cleanupIntervalMs || process.env.CACHE_CLEANUP_INTERVAL_MS || 120_000);
+        const cleanupIntervalMs = Number(options.cleanupIntervalMs || config.cacheCleanupInterval);
+        this.cleanupIntervalMs = isNaN(cleanupIntervalMs) ? 120_000 : cleanupIntervalMs;
         this.map = new Map(); // Map<key, { value, expiresAt }>
 
         if (this.cleanupIntervalMs > 0) {
