@@ -108,6 +108,10 @@ class Config {
     get cacheTtlUserData() {
         return process.env.CACHE_TTL_USER_DATA_MS;
     }
+
+    get cacheTtlLicenses() {
+        return process.env.CACHE_TTL_LICENSES_MS;
+    }
 }
 
 module.exports = Config;

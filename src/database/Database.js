@@ -22,6 +22,7 @@ class Database {
         this.ttlChatSettingsMs = Number(config.cacheTtlChatSettings || defaultTtlMs);
         this.ttlGlobalSettingsMs = Number(config.cacheTtlGlobalSettings || defaultTtlMs);
         this.ttlUserDataMs = Number(config.cacheTtlUserData || defaultTtlMs);
+        this.ttlLicensesMs = Number(config.cacheTtlLicenses || defaultTtlMs);
     }
 
     async connect() {
@@ -50,6 +51,10 @@ class Database {
 
     chatSettingsCollection() {
         return this.db.collection('chatSettings');
+    }
+
+    licensesCollection() {
+        return this.db.collection('licenses');
     }
 
     _id(id) {
@@ -189,6 +194,16 @@ class Database {
             cacheKey,
             async () => await this.globalSettingsCollection().findOne(),
             this.ttlGlobalSettingsMs
+        );
+    }
+
+    // Licenses
+    async getLicenses() {
+        const cacheKey = `licenses`;
+        return await this.cache.getOrSet(
+            cacheKey,
+            async () => await this.licensesCollection().find({}).toArray(),
+            this.ttlLicensesMs
         );
     }
 }

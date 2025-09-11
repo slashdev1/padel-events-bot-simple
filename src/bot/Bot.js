@@ -94,14 +94,7 @@ class Bot {
 
     async handleSendTo(ctx) {
         if (!await this.isSuperAdmin(ctx.from.id)) return;
-        // const chatId = ctx.chat.id;
-        let [cmdName, ...args] = str2params(ctx.message.text);
-        // let chatSettings = await this.database.getChatSettings(chatId);
-        // if (!chatSettings) {
-        //     chatSettings = await this.makeChatSettings(chatId, ctx);
-        //     await this.database.createChatSettings(chatSettings);
-        // }
-        // if (!this.hasPermission(chatSettings, cmdName, ctx.from.id)) return;
+        let [_, ...args] = str2params(ctx.message.text);
         this.replyToUserDirectOrDoNothing({from: {id: parseInt(args[0])}}, args[1]);
     }
 
@@ -117,6 +110,19 @@ class Bot {
         let [cmdName, ...args] = str2params(ctx.message.text);
         cmdName = cmdName.slice(1);
 
+        if (!await this.isSuperAdmin(ctx.from.id)) {
+            let chatSettings = await this.database.getChatSettings(chatId);
+            if (!chatSettings) {
+                chatSettings = await this.makeChatSettings(chatId, ctx);
+                await this.database.createChatSettings(chatSettings);
+            }
+        
+            if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
+                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
+            if (!this.hasPermission(chatSettings, cmdName, ctx.from.id))
+                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
+        }
+
         if (args.length < 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
         if (args.length > 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана некоректа кількість параметрів. ' + (occurrences(ctx.message.text, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '') + this.botCommands[cmdName].example);
         
@@ -126,15 +132,6 @@ class Bot {
         
         let maxPlayers = parseInt(args[2]);
         if (!maxPlayers || maxPlayers <= 0) return this.replyOrDoNothing(ctx, 'Кількість ігроків повинно бути числом більше 0.');
-
-        let chatSettings = await this.database.getChatSettings(chatId);
-        if (!chatSettings) {
-            chatSettings = await this.makeChatSettings(chatId, ctx);
-            await this.database.createChatSettings(chatSettings);
-        }
-        
-        if (!this.hasPermission(chatSettings, cmdName, ctx.from.id))
-            return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
 
         const creatorId = ctx.from.id;
         const creatorName = extractUserTitle(ctx.from, false);
@@ -165,6 +162,7 @@ class Bot {
     async handleDelGame(ctx) {
         // Важливо: ця команда може запускатись не з групи а напряму боту, тому айді чата береться з гри
         let [cmdName, ...args] = str2params(ctx.message.text);
+        cmdName = cmdName.slice(1);
         const gameId = args[0];
         const game = await this.database.getGame(gameId);
         if (!game || !game.isActive) return;
@@ -176,6 +174,8 @@ class Bot {
                 chatSettings = await this.makeChatSettings(chatId, ctx);
                 await this.database.createChatSettings(chatSettings);
             }
+            if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
+                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
             if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id)) 
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
         }
@@ -409,7 +409,6 @@ class Bot {
             chatId,
             chatName: ctx.chat.title,
             allMembersAreAdministrators: ctx.chat.all_members_are_administrators,
-            level: 'free', // deprecated
             license: 'free',
             botStatus: 'unknown',
             reminders: [],
@@ -429,6 +428,14 @@ class Bot {
             }
         }
         return chatSettings;
+    }
+
+    async hasSuitedLicense(chatSettings, cmdName) {
+        const license = (await this.database.getLicenses()).find(elem => elem.type === chatSettings.license);
+        if (license) {
+            return !!license.commands.find(elem => elem === cmdName);
+        }
+        return false;
     }
 
     hasPermission(chatSettings, cmdName, userId) {
