@@ -1,13 +1,14 @@
 const { Telegraf, Markup } = require('telegraf');
-const { 
-    str2params, 
-    date2int, 
-    date2text, 
-    parseDate, 
-    getStatusByAction, 
-    textMarkdownNormalize, 
-    extractUserTitle, 
-    occurrences 
+const {
+    str2params,
+    date2int,
+    date2text,
+    parseDate,
+    getStatusByAction,
+    textMarkdownNormalize,
+    extractUserTitle,
+    occurrences,
+    isTrue
 } = require('../../utils');
 
 class Bot {
@@ -20,7 +21,7 @@ class Bot {
         this.botCommands = require('../../commands-descriptions.json');
         this.emoji = require('../../emoji.json');
         this.package = require('../../package.json');
-        
+
         this.setupCommands();
         this.setupActions();
         this.setupMyChatMember();
@@ -31,6 +32,7 @@ class Bot {
         this.bot.command('help', this.handleHelp.bind(this));
         this.bot.command('add_game', this.handleAddGame.bind(this));
         this.bot.command('del_game', this.handleDelGame.bind(this));
+        this.bot.command('change_game', this.handleChangeGame.bind(this));
         this.bot.command('active_games', this.handleActiveGames.bind(this));
         this.bot.command('__ver', this.handleGetVersion.bind(this));
         this.bot.command('__time', this.handleTime.bind(this));
@@ -48,7 +50,7 @@ class Bot {
         this.bot.on('my_chat_member', (ctx) => {
             const newStatus = ctx.update.my_chat_member.new_chat_member.status;
             const chatId = ctx.update.my_chat_member.chat.id;
-          
+
             if (newStatus === 'kicked' || newStatus === 'left') {
                 console.log(`Бот вилучений з чату ${chatId}`);
                 this.database.updateChatSettings({ chatId, botStatus: newStatus });
@@ -73,6 +75,7 @@ class Bot {
     }
 
     async handleHelp(ctx) {
+        // TODO: need to check "licensed" property
         this.replyOrDoNothing(ctx, '👾 Список команд, що підтримуються:\n' +
             Object.keys(this.botCommands)
                 .filter(key => this.botCommands[key].isDisplayable !== false)
@@ -116,7 +119,7 @@ class Bot {
                 chatSettings = await this.makeChatSettings(chatId, ctx);
                 await this.database.createChatSettings(chatSettings);
             }
-        
+
             if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
             if (!this.hasPermission(chatSettings, cmdName, ctx.from.id))
@@ -125,11 +128,11 @@ class Bot {
 
         if (args.length < 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
         if (args.length > 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана некоректа кількість параметрів. ' + (occurrences(ctx.message.text, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '') + this.botCommands[cmdName].example);
-        
+
         const stringDate = args[1];
         const parsedDate = parseDate(stringDate);
         if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
-        
+
         let maxPlayers = parseInt(args[2]);
         if (!maxPlayers || maxPlayers <= 0) return this.replyOrDoNothing(ctx, 'Кількість ігроків повинно бути числом більше 0.');
 
@@ -150,11 +153,11 @@ class Bot {
             maxPlayers: parseInt(args[2]),
             players: []
         };
-        
+
         const gameId = await this.database.createGame(game);
         const message = await this.writeGameMessage(ctx, game, gameId);
         await this.database.updateGame(gameId, { messageId: message.message_id });
-        
+
         const replyText = `Ви щойно створили гру "${args[0]}" (id=${gameId}).` + (game.isDateWithoutTime ? '\n\n' + this.emoji.warn + 'Для того щоб коректно нагадувати та деактивовувати ігри краще зазначати дату ігри разом з часом.' : '');
         this.replyToUserDirectOrDoNothing(ctx, replyText);
     }
@@ -163,10 +166,13 @@ class Bot {
         // Важливо: ця команда може запускатись не з групи а напряму боту, тому айді чата береться з гри
         let [cmdName, ...args] = str2params(ctx.message.text);
         cmdName = cmdName.slice(1);
+
+        if (args.length < 1) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Не переданий ідентифікатор гри. ' + this.botCommands[cmdName].example);
+
         const gameId = args[0];
         const game = await this.database.getGame(gameId);
         if (!game || !game.isActive) return;
-        
+
         const chatId = game.chatId;
         if (!await this.isSuperAdmin(ctx.from.id)) {
             let chatSettings = await this.database.getChatSettings(chatId);
@@ -176,10 +182,10 @@ class Bot {
             }
             if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
-            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id)) 
+            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id))
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
         }
-        
+
         await this.database.deactivateGame(gameId);
         try {
             await this.bot.telegram.deleteMessage(game.chatId, game.messageId);
@@ -193,6 +199,75 @@ class Bot {
         this.replyToUserDirectOrDoNothing(ctx, replyText);
     }
 
+    async handleChangeGame(ctx) {
+        // Важливо: ця команда може запускатись не з групи а напряму боту, тому айді чата береться з гри
+        let [cmdName, ...args] = str2params(ctx.message.text);
+        cmdName = cmdName.slice(1);
+
+        if (args.length < 2) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
+
+        const gameId = args.shift();
+        const game = await this.database.getGame(gameId);
+        if (!game) return;
+
+        const chatId = game.chatId;
+        if (!await this.isSuperAdmin(ctx.from.id)) {
+            let chatSettings = await this.database.getChatSettings(chatId);
+            if (!chatSettings && ctx.chat.id < 0) {
+                chatSettings = await this.makeChatSettings(chatId, ctx);
+                await this.database.createChatSettings(chatSettings);
+            }
+            if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
+                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
+            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id))
+                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
+        }
+
+        const supportedParams = { name: null, players: null, date: null, active: null };
+        for (let i = 0; i < args.length; i++) {
+            let [arg, ...val] = args[i].split('=');
+            if (arg in supportedParams) {
+                val = val.join('=');
+                if (val === '') {
+                    return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Не задане значення для параметру "' + arg + '"!');
+                }
+                supportedParams[arg] = val;
+            } else {
+                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Параметр "' + arg + '" не підтримується!');
+            }
+        }
+
+        const updateData = {};
+        for (let key in supportedParams) {
+            if (supportedParams[key] === null) {
+                continue;
+            }
+            if (key === 'name') {
+                updateData.name = supportedParams[key];
+                game.name = updateData.name;
+            } else if (key === 'players') {
+                updateData.maxPlayers = parseInt(supportedParams[key]);
+                if (!updateData.maxPlayers || updateData.maxPlayers <= 0) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Кількість ігроків повинно бути числом більше 0.');
+                game.maxPlayers = updateData.maxPlayers;
+            } else if (key === 'date') {
+                const stringDate = supportedParams[key];
+                const parsedDate = parseDate(stringDate);
+                if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+                updateData.date = new Date(parsedDate);
+                game.date = updateData.date;
+                game.isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
+            } else if (key === 'active') {
+                updateData.isActive = isTrue(supportedParams[key]);
+                game.isActive = updateData.isActive;
+            }
+        }
+        await this.database.updateGame(gameId, updateData);
+        await this.updateGameMessage(game, gameId);
+
+        const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
+        this.replyToUserDirectOrDoNothing(ctx, replyText);
+    }
+
     async handleActiveGames(ctx) {
         const chatId = ctx.chat.id;
         const userId = ctx.from.id;
@@ -202,7 +277,7 @@ class Bot {
             filter.chatId = chatId;
             where = ' у ' + ctx.chat.title;
         }
-        
+
         const games = await this.database.getActiveGames(filter);
         let response = `Немає активних ігор${where}.`;
         if (games.length) {
@@ -276,13 +351,14 @@ class Bot {
         const m = (user) => (user.name[0] != '@' && user.name.indexOf(' ') == -1 ? '@' : '') + user.name +
             (user.extraPlayer ? '(+' + user.extraPlayer + ')': '');
         return textMarkdownNormalize(
+            (!game.isActive ? '‼️ НЕАКТИВНА ‼️\n\n' : '') +
             `📅 **${game.name} (${date2text(game.date)})**\n\n` +
             `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}/${game.maxPlayers}\n` +
             `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, game.maxPlayers).map(p => `${m(p)}`).join(', ') || '-'}\n` +
             `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `${m(p)}`).join(', ') || '-'}\n` +
             `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `${m(p)}`).join(', ') || '-'}\n` +
             `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `${m(p)}`).join(', ') || '-'}\n\n` +
-            `Опубліковано ${game.creatorName}`
+            `✍️ Опубліковано ${game.creatorName}`
         );
     }
 
@@ -301,10 +377,10 @@ class Bot {
 
         try {
             return await this.bot.telegram.editMessageText(
-                game.chatId, 
-                game.messageId, 
-                null, 
-                this.buildTextMessage(game), 
+                game.chatId,
+                game.messageId,
+                null,
+                this.buildTextMessage(game),
                 { parse_mode: 'Markdown', ...this.buildMarkup(gameId) }
             );
         } catch (error) {

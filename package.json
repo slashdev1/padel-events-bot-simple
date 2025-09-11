@@ -1,6 +1,6 @@
 {
   "name": "padel-events-bot-simple",
-  "version": "0.6.909",
+  "version": "0.7.911",
   "description": "Padel Events Telegram Bot",
   "license": "MIT",
   "main": "app.js",
