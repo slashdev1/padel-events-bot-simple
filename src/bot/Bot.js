@@ -98,7 +98,7 @@ class Bot {
     async handleSendTo(ctx) {
         if (!await this.isSuperAdmin(ctx.from.id)) return;
         let [_, ...args] = str2params(ctx.message.text);
-        this.replyToUserDirectOrDoNothing({from: {id: parseInt(args[0])}}, args[1]);
+        this.replyToUserDirectOrDoNothing({ from: { id: parseInt(args[0]) } }, textMarkdownNormalize(args[1]));
     }
 
     async handleGetAdm(ctx) {
