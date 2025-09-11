@@ -38,6 +38,7 @@ class Bot {
         this.bot.command('__time', this.handleTime.bind(this));
         this.bot.command('__send_to', this.handleSendTo.bind(this));
         this.bot.command('__adm', this.handleGetAdm.bind(this));
+        this.bot.command('__del_msg', this.handleDeleteMessage.bind(this));
     }
 
     setupActions() {
@@ -103,6 +104,18 @@ class Bot {
 
     async handleGetAdm(ctx) {
         this.replyToUserDirectOrDoNothing(ctx, String((await this.database.getGlobalSettings())?.superAdminId));
+    }
+
+    async handleDeleteMessage(ctx) {
+        if (!await this.isSuperAdmin(ctx.from.id)) return;
+        let [_, chatId, messageId] = str2params(ctx.message.text);
+
+        try {
+            await this.bot.telegram.deleteMessage(chatId, messageId);
+        } catch (error) {
+            return this.replyToUserDirectOrDoNothing(ctx, error);
+        }
+        return this.replyToUserDirectOrDoNothing(ctx, 'Повідомлення видалено.');
     }
 
     async handleAddGame(ctx) {
