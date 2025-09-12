@@ -33,6 +33,7 @@ class Bot {
         this.bot.command('add_game', this.handleAddGame.bind(this));
         this.bot.command('del_game', this.handleDelGame.bind(this));
         this.bot.command('change_game', this.handleChangeGame.bind(this));
+        this.bot.command('kick', this.handleKickFromGame.bind(this));
         this.bot.command('active_games', this.handleActiveGames.bind(this));
         this.bot.command('__ver', this.handleGetVersion.bind(this));
         this.bot.command('__time', this.handleTime.bind(this));
@@ -158,8 +159,6 @@ class Bot {
             createdByName: creatorName,
             isActive: true,
             chatId,
-            creatorId,
-            creatorName,
             name: args[0],
             date: new Date(parsedDate),
             isDateWithoutTime: stringDate.match(/\d+/g).length < 4,
@@ -195,7 +194,7 @@ class Bot {
             }
             if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
-            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id))
+            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id, game.createdById))
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
         }
 
@@ -232,7 +231,7 @@ class Bot {
             }
             if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
-            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id))
+            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id, game.createdById))
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
         }
 
@@ -281,6 +280,44 @@ class Bot {
         this.replyToUserDirectOrDoNothing(ctx, replyText);
     }
 
+    async handleKickFromGame(ctx) {
+        // Важливо: ця команда може запускатись не з групи а напряму боту, тому айді чата береться з гри
+        let [cmdName, ...args] = str2params(ctx.message.text);
+        cmdName = cmdName.slice(1);
+
+        if (args.length < 2) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
+
+        const gameId = args.shift();
+        const game = await this.database.getGame(gameId);
+        if (!game) return;
+
+        const chatId = game.chatId;
+        if (!await this.isSuperAdmin(ctx.from.id)) {
+            let chatSettings = await this.database.getChatSettings(chatId);
+            if (!chatSettings && ctx.chat.id < 0) {
+                chatSettings = await this.makeChatSettings(chatId, ctx);
+                await this.database.createChatSettings(chatSettings);
+            }
+            if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
+                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
+            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id, game.createdById, false))
+                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
+        }
+
+        let player = args.shift();
+        const filtered = game.players.filter(p => String(p.id) === player || p.name === player);
+        if (filtered.length === 0) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + `Ігрока "${player}" не було знайдено у грі "${game.name}".`);
+        if (filtered[0].status === 'kicked') return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + `Ігрок "${player}" вже був виключений з гри "${game.name}".`);
+        const setIds = new Set();
+        filtered.forEach(p => setIds.add(p.id));
+        if (setIds.size > 1) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + `Знайдено різних ігроків за запитом "${player}" у грі "${game.name}". Уточніть дані ігрока.`);
+        filtered.forEach((p) => p.status = 'kicked');
+        await this.database.updateGame(game._id, { players: game.players });
+
+        this.updateGameMessage(game, gameId);
+        return this.replyToUserDirectOrDoNothing(ctx, `Ігрока "${player}" виключено з гри "${game.name}".`);
+    }
+
     async handleActiveGames(ctx) {
         const chatId = ctx.chat.id;
         const userId = ctx.from.id;
@@ -304,6 +341,7 @@ class Bot {
                 if (ind >= 0 && ind >= game.maxPlayers) status = '⏳ У черзі';
                 if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
                 if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
+                if (game.players.some(p => p.id === userId && p.status === 'kicked')) status = "🦶 Вас виключено";
                 if (status)
                     lines.push({gameDate, text: `📅 **${game.name} (${date2text(game.date)})** - ${status}`});
             });
@@ -326,6 +364,9 @@ class Bot {
 
         const newStatus = getStatusByAction(action);
         let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer);
+        if (playerInd != -1 && game.players[playerInd].status === 'kicked') {
+            return this.replyToUser(ctx, "Ви не можете змінити статус, бо вас виключено з гри.");
+        }
         if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
             return this.replyToUser(ctx, 'Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
         }
@@ -371,7 +412,7 @@ class Bot {
             `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `${m(p)}`).join(', ') || '-'}\n` +
             `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `${m(p)}`).join(', ') || '-'}\n` +
             `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `${m(p)}`).join(', ') || '-'}\n\n` +
-            `✍️ Опубліковано ${game.creatorName}`
+            `✍️ Опубліковано ${game.createdByName}`
         );
     }
 
@@ -527,18 +568,20 @@ class Bot {
         return false;
     }
 
-    hasPermission(chatSettings, cmdName, userId) {
+    hasPermission(chatSettings, cmdName, userId, createdById, valueIfNoFoundCommand = true) {
         const cmdPermission = chatSettings.permissions.find(elem => elem.command === cmdName);
-        if (cmdPermission) {
-            let users = [];
-            if      (cmdPermission.appliesTo === 'all') users = undefined;
-            else if (cmdPermission.appliesTo === 'admins') users = chatSettings.admins;
-            else if (cmdPermission.appliesTo === 'users') users = cmdPermission.users;
-            if (users && !users.some(usr => usr.id === userId)) {
-                return false;
-            }
+        if (!cmdPermission) return valueIfNoFoundCommand;
+
+        const appliesTo = cmdPermission.appliesTo.split(',');
+        if (appliesTo.some(v => v === 'all')) return true;
+
+        let users = [];
+        for (let item of appliesTo) {
+            if (item === 'admins') users.push(...chatSettings.admins);
+            else if (item === 'specificUsers') users.push(...cmdPermission.users);
+            else if (item === 'author' && createdById) users.push({ id: createdById });
         }
-        return true;
+        return users.some(usr => usr.id === userId);
     }
 
     async isSuperAdmin(userId) {
