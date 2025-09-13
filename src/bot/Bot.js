@@ -202,10 +202,12 @@ class Bot {
         try {
             await this.bot.telegram.deleteMessage(game.chatId, game.messageId);
         } catch (error) {
+            console.error(error);
             if (error?.code === 400) {
                 // message to delete not found
-            } else
-                this.replyOrDoNothing(ctx, message);
+            } else {
+                await this.replyToUserDirectOrDoNothing(ctx, 'Сталася помилка при спробі видалення повідомлення з грою.');
+            }
         }
         const replyText = `Ви щойно видалили гру "${game.name}" (id=${gameId}).`
         this.replyToUserDirectOrDoNothing(ctx, replyText);
