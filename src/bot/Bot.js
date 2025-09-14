@@ -183,7 +183,7 @@ class Bot {
 
         const gameId = args[0];
         const game = await this.database.getGame(gameId);
-        if (!game || !game.isActive) return;
+        if (!game) return;
 
         const chatId = game.chatId;
         if (!await this.isSuperAdmin(ctx.from.id)) {
@@ -198,16 +198,12 @@ class Bot {
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
         }
 
-        await this.database.deactivateGame(gameId);
+        if (!game.isActive) await this.database.deactivateGame(gameId);
         try {
             await this.bot.telegram.deleteMessage(game.chatId, game.messageId);
         } catch (error) {
             console.error(error);
-            if (error?.code === 400) {
-                // message to delete not found
-            } else {
-                await this.replyToUserDirectOrDoNothing(ctx, 'Сталася помилка при спробі видалення повідомлення з грою.');
-            }
+            await this.replyToUser(ctx, `Сталася помилка при спробі видалення повідомлення з грою: ${error?.code} - ${error?.description}`);
         }
         const replyText = `Ви щойно видалили гру "${game.name}" (id=${gameId}).`
         this.replyToUserDirectOrDoNothing(ctx, replyText);
