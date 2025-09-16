@@ -79,6 +79,24 @@ const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_'
 
 const extractUserTitle = (user, useUserName) => user.username && useUserName !== false ? '@' + user.username : (user.first_name + ' ' + (user.last_name || '')).trim();
 
+const extractStartTime = (str) => {
+    const extractTime = (str) => {
+        const regex = /(\d{1,2}:\d{2})-(\d{1,2}:\d{2})|(\d{1,2}-\d{1,2}:\d{2})|(\d{1,2}:\d{2})/g;
+        const matches = str.match(regex);
+        if (matches) {
+            // Обробка випадку з 7-9:00, де match[0] буде "7-9:00"
+            if (matches[0].includes('-') && matches[0].split('-').indexOf(':') === -1) {
+            const parts = matches[0].split('-');
+            return `${parts[0]}:00-${parts[1]}`;
+            }
+            return matches.join(' ');
+        }
+        return null;
+    }
+    let time = extractTime(str);
+    if (!time) return;
+    return time.split('-')[0];
+}
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
     date.setDate(date.getDate() + days);
@@ -96,9 +114,22 @@ Date.prototype.startOfDay = function() {
     date.setUTCHours(0,0,0,0);
     return date;
 }
+
 Date.prototype.endOfDay = function() {
     var date = new Date(this.valueOf());
     date.setUTCHours(23,59,59,999);
+    return date;
+}
+
+Date.prototype.startOfSecond = function() {
+    var date = new Date(this.valueOf());
+    date.setMilliseconds(0);
+    return date;
+}
+
+Date.prototype.endOfSecond = function() {
+    var date = new Date(this.valueOf());
+    date.setMilliseconds(999);
     return date;
 }
 
@@ -112,5 +143,6 @@ module.exports = {
     textMarkdownNormalize,
     getStatusByAction,
     extractUserTitle,
-    occurrences
+    occurrences,
+    extractStartTime
 };

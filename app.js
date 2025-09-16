@@ -1,8 +1,8 @@
-const Config = require('./src/config/Config');
-const Database = require('./src/database/Database');
-const WebServer = require('./src/webserver/WebServer');
-const Bot = require('./src/bot/Bot');
-const Scheduler = require('./src/scheduler/Scheduler');
+const Config = require('./classes/Config');
+const Database = require('./classes/Database');
+const WebServer = require('./classes/WebServer');
+const Bot = require('./classes/Bot');
+const Scheduler = require('./classes/Scheduler');
 
 class PadelBotApp {
     constructor() {
@@ -15,7 +15,7 @@ class PadelBotApp {
 
     async start() {
         console.log(`Date on server ${new Date()}`);
-        
+
         // Connect to database
         await this.database.connect();
 
@@ -63,7 +63,7 @@ class PadelBotApp {
         if (!this.config.usePolling) {
             config.webhook = this.config.webhookConfig;
         }
-        
+
         await this.bot.launch(config, onLaunch);
     }
 
@@ -74,19 +74,19 @@ class PadelBotApp {
 
     async shutdown(signal) {
         console.log(`Received ${signal}, shutting down gracefully...`);
-        
+
         if (this.scheduler) {
             this.scheduler.stop();
         }
-        
+
         if (this.bot) {
             this.bot.stop(signal);
         }
-        
+
         if (this.database) {
             await this.database.disconnect();
         }
-        
+
         process.exit(0);
     }
 }

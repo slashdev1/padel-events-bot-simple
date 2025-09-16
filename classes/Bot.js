@@ -8,8 +8,9 @@ const {
     textMarkdownNormalize,
     extractUserTitle,
     occurrences,
-    isTrue
-} = require('../../utils');
+    isTrue,
+    extractStartTime
+} = require('../helpers/utils');
 
 class Bot {
     constructor(token, database, webServer) {
@@ -18,9 +19,9 @@ class Bot {
         this.webServer = webServer;
         this.botName = null;
         this.botUrl = null;
-        this.botCommands = require('../../commands-descriptions.json');
-        this.emoji = require('../../emoji.json');
-        this.package = require('../../package.json');
+        this.botCommands = require('../config/commands-descriptions.json');
+        this.emoji = require('../config/emoji.json');
+        this.package = require('../package.json');
 
         this.setupCommands();
         this.setupActions();
@@ -143,7 +144,12 @@ class Bot {
         if (args.length < 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
         if (args.length > 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана некоректа кількість параметрів. ' + (occurrences(ctx.message.text, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '') + this.botCommands[cmdName].example);
 
-        const stringDate = args[1];
+        const name = args[0];
+        let stringDate = args[1];
+        if (stringDate.match(/\d+/g).length === 3) {
+            const time = extractStartTime(name);
+            if (time) stringDate += ' ' + time;
+        }
         const parsedDate = parseDate(stringDate);
         if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
 
@@ -159,7 +165,7 @@ class Bot {
             createdByName: creatorName,
             isActive: true,
             chatId,
-            name: args[0],
+            name,
             date: new Date(parsedDate),
             isDateWithoutTime: stringDate.match(/\d+/g).length < 4,
             maxPlayers: parseInt(args[2]),
@@ -170,7 +176,7 @@ class Bot {
         const message = await this.writeGameMessage(ctx, game, gameId);
         await this.database.updateGame(gameId, { messageId: message.message_id });
 
-        const replyText = `Ви щойно створили гру "${args[0]}" (id=${gameId}).` + (game.isDateWithoutTime ? '\n\n' + this.emoji.warn + 'Для того щоб коректно нагадувати та деактивовувати ігри краще зазначати дату ігри разом з часом.' : '');
+        const replyText = `Ви щойно створили гру "${game.name}" (id=${gameId}).` + (game.isDateWithoutTime ? '\n\n' + this.emoji.warn + 'Для того щоб коректно нагадувати та деактивовувати ігри краще зазначати дату ігри разом з часом.' : '');
         this.replyToUserDirectOrDoNothing(ctx, replyText);
     }
 

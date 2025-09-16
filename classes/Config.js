@@ -1,4 +1,4 @@
-const loadEnvConfig = require('../../env');
+const loadEnvConfig = require('../helpers/env');
 
 class Config {
     constructor() {

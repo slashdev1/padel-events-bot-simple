@@ -11,6 +11,7 @@ class Scheduler {
         this.scheduleGameDeactivation();
         this.scheduleDailyReminders();
         this.scheduleTodayReminders();
+        this.scheduleOneHourBeforeReminders();
     }
 
     stop() {
@@ -48,6 +49,18 @@ class Scheduler {
         this.jobs.push(job);
     }
 
+    scheduleOneHourBeforeReminders() {
+        const job = cron.schedule('*/5 * * * *', async () => {
+            await this.sendNotification(
+                new Date().addMinutes(60).startOfSecond(),
+                new Date().addMinutes(64).endOfSecond(),
+                'За годину',
+                true
+            );
+        });
+        this.jobs.push(job);
+    }
+
     async sendNotification(dateStart, dateEnd, whenText, onlyIfDateWithTime = false) {
         const games = await this.database.getGamesForNotification(
             dateStart,
@@ -60,8 +73,8 @@ class Scheduler {
             try {
                 await this.bot.sendMessage(game.chatId, replyText, { reply_to_message_id: game.messageId });
             } catch (error) {
-                if (error?.code === 400) // 400: Bad Request: message to be replied not found
-                    this.bot.sendMessage(game.chatId, replyText);
+                if (error.description.includes('message to be replied not found')) // 400: Bad Request: message to be replied not found
+                    await this.bot.sendMessage(game.chatId, replyText);
             }
         });
     }

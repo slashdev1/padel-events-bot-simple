@@ -1,4 +1,4 @@
-const Config = require('../config/Config');
+const Config = require('./Config');
 
 class Cache {
     constructor(options = {}) {

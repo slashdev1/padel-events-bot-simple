@@ -1,6 +1,6 @@
 const { MongoClient, ObjectId } = require('mongodb');
-const Cache = require('../cache/Cache');
-const Config = require('../config/Config');
+const Cache = require('./Cache');
+const Config = require('./Config');
 
 class Database {
     constructor(mongoUri, dbName) {
