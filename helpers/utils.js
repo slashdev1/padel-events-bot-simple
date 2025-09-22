@@ -54,7 +54,7 @@ const date2text = (date) => {
     });
 };
 
-const parseDate = (str) => {
+const parseDate = (str, timezoneOffset) => {
     let stringDate = str;
     let parsedDate = Date.parse(stringDate);
     const partsDate = stringDate.match(/\d+/g);
@@ -66,6 +66,7 @@ const parseDate = (str) => {
         if (partsDate.length === 5) stringDate = `${partsDate[0]}-${partsDate[1]}-${partsDate[2]} ${partsDate[3]}:${partsDate[4]}`;
         parsedDate = Date.parse(stringDate);
     }
+    if (parsedDate !== NaN && timezoneOffset) parsedDate += 60000 * (timezoneOffset - new Date().getTimezoneOffset());
     return parsedDate;
 };
 

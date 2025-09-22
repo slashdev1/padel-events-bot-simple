@@ -95,7 +95,7 @@ class Bot {
 
     async handleTime(ctx) {
         const now = new Date();
-        this.replyToUserDirectOrDoNothing(ctx, `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}`);
+        this.replyToUserDirectOrDoNothing(ctx, `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}\n\nЧасовий здвиг:\n${now.getTimezoneOffset()} хв.`);
     }
 
     async handleSendTo(ctx) {
@@ -128,8 +128,8 @@ class Bot {
         let [cmdName, ...args] = str2params(ctx.message.text);
         cmdName = cmdName.slice(1);
 
+        let chatSettings = await this.database.getChatSettings(chatId);
         if (!await this.isSuperAdmin(ctx.from.id)) {
-            let chatSettings = await this.database.getChatSettings(chatId);
             if (!chatSettings) {
                 chatSettings = await this.makeChatSettings(chatId, ctx);
                 await this.database.createChatSettings(chatSettings);
@@ -150,7 +150,7 @@ class Bot {
             const time = extractStartTime(name);
             if (time) stringDate += ' ' + time;
         }
-        const parsedDate = parseDate(stringDate);
+        const parsedDate = parseDate(stringDate, chatSettings.timezoneOffset);
         if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
 
         let maxPlayers = parseInt(args[2]);
@@ -209,7 +209,11 @@ class Bot {
             await this.bot.telegram.deleteMessage(game.chatId, game.messageId);
         } catch (error) {
             console.error(error);
-            await this.replyToUser(ctx, `Сталася помилка при спробі видалення повідомлення з грою: ${error?.code} - ${error?.description}`);
+            //await this.replyToUser(ctx, `Сталася помилка при спробі видалення повідомлення з грою: ${error?.code} - ${error?.description}`);
+            try {
+                game.isActive = false;
+                await this.updateGameMessage(game, gameId);
+            } catch (error) {}
         }
         const replyText = `Ви щойно видалили гру "${game.name}" (id=${gameId}).`
         this.replyToUserDirectOrDoNothing(ctx, replyText);
@@ -227,8 +231,8 @@ class Bot {
         if (!game) return;
 
         const chatId = game.chatId;
+        let chatSettings = await this.database.getChatSettings(chatId);
         if (!await this.isSuperAdmin(ctx.from.id)) {
-            let chatSettings = await this.database.getChatSettings(chatId);
             if (!chatSettings && ctx.chat.id < 0) {
                 chatSettings = await this.makeChatSettings(chatId, ctx);
                 await this.database.createChatSettings(chatSettings);
@@ -267,7 +271,7 @@ class Bot {
                 game.maxPlayers = updateData.maxPlayers;
             } else if (key === 'date') {
                 const stringDate = supportedParams[key];
-                const parsedDate = parseDate(stringDate);
+                const parsedDate = parseDate(stringDate, chatSettings.timezoneOffset);
                 if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
                 updateData.date = new Date(parsedDate);
                 game.date = updateData.date;
