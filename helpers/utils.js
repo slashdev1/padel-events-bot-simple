@@ -54,7 +54,15 @@ const date2text = (date) => {
     });
 };
 
-const parseDate = (str, timezoneOffset) => {
+const isNumeric = (input) => {
+    return typeof input === 'number' || !Number.isNaN(Number(input));
+}
+
+const convertTZ = (date, tzString) => {
+    return new Date((typeof date === 'string' || typeof date === 'number' ? new Date(date) : date).toLocaleString('en-US', { timeZone: tzString }));
+}
+
+const parseDate = (str, timezoneOrOffset) => {
     let stringDate = str;
     let parsedDate = Date.parse(stringDate);
     const partsDate = stringDate.match(/\d+/g);
@@ -66,9 +74,14 @@ const parseDate = (str, timezoneOffset) => {
         if (partsDate.length === 5) stringDate = `${partsDate[0]}-${partsDate[1]}-${partsDate[2]} ${partsDate[3]}:${partsDate[4]}`;
         parsedDate = Date.parse(stringDate);
     }
-    if (parsedDate !== NaN && timezoneOffset) parsedDate += 60000 * (timezoneOffset - new Date().getTimezoneOffset());
+    if (parsedDate !== NaN) parsedDate = normalizeParsedDate(parsedDate, timezoneOrOffset);
     return parsedDate;
-};
+}
+
+const normalizeParsedDate = (parsedDate, timezoneOrOffset) => {
+    if (isNumeric(timezoneOrOffset)) return parsedDate + 60000 * (+timezoneOrOffset - new Date().getTimezoneOffset());
+    return convertTZ(parsedDate, timezoneOrOffset).getTime();
+}
 
 const getStatusByAction = (action) => {
     if (action === 'join')    return 'joined';
@@ -145,5 +158,6 @@ module.exports = {
     getStatusByAction,
     extractUserTitle,
     occurrences,
-    extractStartTime
+    extractStartTime,
+    normalizeParsedDate
 };

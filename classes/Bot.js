@@ -9,7 +9,8 @@ const {
     extractUserTitle,
     occurrences,
     isTrue,
-    extractStartTime
+    extractStartTime,
+    normalizeParsedDate
 } = require('../helpers/utils');
 
 class Bot {
@@ -94,8 +95,16 @@ class Bot {
     }
 
     async handleTime(ctx) {
+        const chatId = ctx.chat.id;
         const now = new Date();
-        this.replyToUserDirectOrDoNothing(ctx, `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}\n\nЧасовий здвиг:\n${now.getTimezoneOffset()} хв.`);
+        let replyText = `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}\nЧасовий здвиг на сервері:\n${now.getTimezoneOffset()} хв.`;
+        const chatSettings = await this.database.getChatSettings(chatId);
+        if (chatSettings) {
+            let parsedDate = normalizeParsedDate(now.getTime(), chatSettings.timezone || chatSettings.timezoneOffset);
+            const clientNow = new Date(parsedDate);
+            replyText += `\n\nЧас у вас:\n${clientNow}\nЧасова зона/здвиг у вас:\n${chatSettings.timezone || chatSettings.timezoneOffset}\n`;
+        }
+        this.replyToUserDirectOrDoNothing(ctx, replyText);
     }
 
     async handleSendTo(ctx) {
@@ -150,7 +159,7 @@ class Bot {
             const time = extractStartTime(name);
             if (time) stringDate += ' ' + time;
         }
-        const parsedDate = parseDate(stringDate, chatSettings.timezoneOffset);
+        const parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
         if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
 
         let maxPlayers = parseInt(args[2]);
@@ -271,7 +280,7 @@ class Bot {
                 game.maxPlayers = updateData.maxPlayers;
             } else if (key === 'date') {
                 const stringDate = supportedParams[key];
-                const parsedDate = parseDate(stringDate, chatSettings.timezoneOffset);
+                const parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
                 if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
                 updateData.date = new Date(parsedDate);
                 game.date = updateData.date;
