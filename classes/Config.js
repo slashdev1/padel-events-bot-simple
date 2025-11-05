@@ -112,6 +112,14 @@ class Config {
     get cacheTtlLicenses() {
         return process.env.CACHE_TTL_LICENSES_MS;
     }
+
+    get timezoneClientDefault() {
+        return process.env.TIMEZONE_CLIENT_DEFAULT;
+    }
+
+    get licenseClientDefault() {
+        return process.env.LICENSE_CLIENT_DEFAULT;
+    }
 }
 
 module.exports = Config;

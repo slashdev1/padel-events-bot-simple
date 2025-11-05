@@ -14,10 +14,11 @@ const {
 } = require('../helpers/utils');
 
 class Bot {
-    constructor(token, database, webServer) {
-        this.bot = new Telegraf(token);
+    constructor(config, database, webServer) {
+        this.config = config;
         this.database = database;
         this.webServer = webServer;
+        this.bot = new Telegraf(this.config.botToken);
         this.botName = null;
         this.botUrl = null;
         this.botCommands = require('../config/commands-descriptions.json');
@@ -552,16 +553,18 @@ class Bot {
     }
 
     async makeChatSettings(chatId, ctx) {
+        const config = { license: this.config.licenseClientDefault || 'free', timezone: this.config.timezoneClientDefault };
         const chatSettings = {
             chatId,
             chatName: ctx.chat.title,
             allMembersAreAdministrators: ctx.chat.all_members_are_administrators,
-            license: 'free',
+            license: config.license,
             botStatus: 'unknown',
             reminders: [],
             admins: [],
             permissions: [],
-            features: []
+            features: [],
+            timezone: config.timezone
         }
         if (!chatSettings.allMembersAreAdministrators) {
             const admins = await this.bot.telegram.getChatAdministrators(chatId);

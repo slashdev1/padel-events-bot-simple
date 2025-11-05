@@ -26,7 +26,7 @@ class PadelBotApp {
         }
 
         // Initialize bot
-        this.bot = new Bot(this.config.botToken, this.database, this.webServer);
+        this.bot = new Bot(this.config, this.database, this.webServer);
 
         // Initialize scheduler
         this.scheduler = new Scheduler(this.database, this.bot);
