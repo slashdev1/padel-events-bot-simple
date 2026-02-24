@@ -12,6 +12,7 @@ const {
     extractStartTime,
     normalizeParsedDate
 } = require('../helpers/utils');
+const { Temporal } = require('@js-temporal/polyfill');
 
 class Bot {
     constructor(config, database, webServer) {
@@ -160,7 +161,12 @@ class Bot {
             const time = extractStartTime(name);
             if (time) stringDate += ' ' + time;
         }
-        const parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
+        //const parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
+        let parsedDate;
+        if (chatSettings.timezone) {
+            const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T');
+            parsedDate = Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.timezone}]`).toInstant().toString();
+        } else parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
         if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
 
         let maxPlayers = parseInt(args[2]);
@@ -181,6 +187,9 @@ class Bot {
             maxPlayers: parseInt(args[2]),
             players: []
         };
+        console.log(`Now ${new Date()}`);
+        console.log(`Converted Date ${game.date}`);
+        console.log(`Game ${game.name}`);
 
         const gameId = await this.database.createGame(game);
         const message = await this.writeGameMessage(ctx, game, gameId);
@@ -375,6 +384,7 @@ class Bot {
         const [gameId, extraAction] = ctx.match[1].split('_');
         const userId = ctx.from.id;
         const username = extractUserTitle(ctx.from);
+        const fullName = extractUserTitle(ctx.from, false);
         const timestamp = new Date();
 
         const game = await this.database.getGame(gameId);
@@ -411,7 +421,7 @@ class Bot {
         }
 
         if (extraAction !== 'minus')
-            game.players.push({ id: userId, name: username, extraPlayer, status: newStatus, timestamp });
+            game.players.push({ id: userId, name: username, fullName: fullName, extraPlayer, status: newStatus, timestamp });
         game.players.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         await this.database.updateGame(game._id, { players: game.players });
 
@@ -420,16 +430,21 @@ class Bot {
 
     buildTextMessage(game) {
         const players = game.players || [];
-        const m = (user) => (user.name[0] != '@' && user.name.indexOf(' ') == -1 ? '@' : '') + user.name +
-            (user.extraPlayer ? '(+' + user.extraPlayer + ')': '');
+        // const m = (user) => (user.name[0] != '@' && user.name.indexOf(' ') == -1 ? '@' : '') + user.name +
+        //     (user.extraPlayer ? '(+' + user.extraPlayer + ')': '');
+        const m = (user) => {
+            const flag = user.name[0] == '@';
+            return user.fullName ? ((flag ? '[' : '') + user.fullName + (flag ? ']' : '') + (flag ? `(https://t.me/${user.name.slice(1)})` : '')) : ((!flag && user.name.indexOf(' ') == -1 ? '@' : '') + user.name) +
+                (user.extraPlayer ? '(+' + user.extraPlayer + ')' : '');
+        };
         return textMarkdownNormalize(
             (!game.isActive ? '‼️ НЕАКТИВНА ‼️\n\n' : '') +
             `📅 **${game.name} (${date2text(game.date)})**\n\n` +
             `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}/${game.maxPlayers}\n` +
-            `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, game.maxPlayers).map(p => `${m(p)}`).join(', ') || '-'}\n` +
-            `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `${m(p)}`).join(', ') || '-'}\n` +
-            `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `${m(p)}`).join(', ') || '-'}\n` +
-            `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `${m(p)}`).join(', ') || '-'}\n\n` +
+            `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, game.maxPlayers).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
+            `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
+            `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
+            `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n\n` +
             `✍️ Опубліковано ${game.createdByName}`
         );
     }
@@ -453,7 +468,7 @@ class Bot {
                 game.messageId,
                 null,
                 this.buildTextMessage(game),
-                { parse_mode: 'Markdown', ...this.buildMarkup(gameId) }
+                { parse_mode: 'Markdown', link_preview_options: {is_disabled: true}, ...this.buildMarkup(gameId) }
             );
         } catch (error) {
             console.error(error);
@@ -462,7 +477,7 @@ class Bot {
 
     async writeGameMessage(ctx, game, gameId) {
         if (!game) return;
-        return await this.replyOrDoNothing(ctx, this.buildTextMessage(game), { parse_mode: 'Markdown', ...this.buildMarkup(gameId) });
+        return await this.replyOrDoNothing(ctx, this.buildTextMessage(game), { parse_mode: 'Markdown', link_preview_options: {is_disabled: true}, ...this.buildMarkup(gameId) });
     }
 
     async replyToUser(ctx, message) {
@@ -553,7 +568,7 @@ class Bot {
     }
 
     async makeChatSettings(chatId, ctx) {
-        const config = { license: this.config.licenseClientDefault || 'free', timezone: this.config.timezoneClientDefault };
+        const config = { license: this.config.licenseClientDefault || 'free', timezone: this.config.timezoneClientDefault, notificationTerms: this.config.notificationTerms || '-1440,-60' };
         const chatSettings = {
             chatId,
             chatName: ctx.chat.title,
@@ -564,7 +579,8 @@ class Bot {
             admins: [],
             permissions: [],
             features: [],
-            timezone: config.timezone
+            timezone: config.timezone,
+            notificationTerms: config.notificationTerms
         }
         if (!chatSettings.allMembersAreAdministrators) {
             const admins = await this.bot.telegram.getChatAdministrators(chatId);
@@ -587,6 +603,8 @@ class Bot {
         }
         return false;
     }
+
+    // TODO: add features/limits (maxNotifiactionTerms: 2)
 
     hasPermission(chatSettings, cmdName, userId, createdById, valueIfNoFoundCommand = true) {
         const cmdPermission = chatSettings.permissions.find(elem => elem.command === cmdName);

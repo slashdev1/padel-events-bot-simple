@@ -120,6 +120,35 @@ class Database {
         return await this.gamesCollection().find(filter).toArray();
     }
 
+    async getActiveGamesWithSettings(dateStart) {
+        return await this.gamesCollection().aggregate([
+            {
+                $match: { isActive: true, date: { $gte: dateStart } }
+            },
+            {
+                $lookup: {
+                    from: 'chatSettings',
+                    localField: 'chatId',
+                    foreignField: 'chatId',
+                    as: 'chatSettings'
+                }
+            },
+            { $unwind: { path: '$chatSettings', preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 1,
+                    name: 1,
+                    date: 1,
+                    chatId: 1,
+                    messageId: 1,
+                    //sentReminders: 1,
+                    notificationTerms: '$chatSettings.notificationTerms',
+                    license: '$chatSettings.license'
+                }
+            }
+        ]).toArray();
+    }
+
     // User operations
     async getUser(userId) {
         const cacheKey = `User:${userId}`;

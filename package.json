@@ -9,6 +9,7 @@
     "dev": "node app.js"
   },
   "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "mongodb": "^6.15.0",

@@ -120,6 +120,10 @@ class Config {
     get licenseClientDefault() {
         return process.env.LICENSE_CLIENT_DEFAULT;
     }
+
+    get notificationTerms() {
+        return process.env.NOTIFICATION_TERMS_DEFAULT;
+    }
 }
 
 module.exports = Config;
