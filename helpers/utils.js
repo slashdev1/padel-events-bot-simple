@@ -93,7 +93,7 @@ const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_'
 
 const extractUserTitle = (user, useUserName) => user.username && useUserName !== false ? '@' + user.username : (user.first_name + ' ' + (user.last_name || '')).trim();
 
-const extractStartTime = (str) => {
+const extractStartTime_old = (str) => {
     const extractTime = (str) => {
         const regex = /(\d{1,2}:\d{2})-(\d{1,2}:\d{2})|(\d{1,2}-\d{1,2}:\d{2})|(\d{1,2}:\d{2})/g;
         const matches = str.match(regex);
@@ -111,6 +111,55 @@ const extractStartTime = (str) => {
     if (!time) return;
     return time.split('-')[0];
 }
+
+const extractStartTime = (str) => {
+    const extractTime = (str) => {
+        const divider = /\s*[-—–]\s*/.source;
+        // Дозволяємо обом частинам (початку і кінцю) бути без хвилин
+        const regex = new RegExp(`(\\d{1,2}(?::\\d{2})?)${divider}(\\d{1,2}(?::\\d{2})?)|(\\d{1,2}:\\d{2})`, 'g');
+
+        const match = regex.exec(str);
+
+        if (match) {
+            if (match[1]) { // Якщо це діапазон
+                let start = match[1];
+                // Додаємо :00, якщо хвилин немає
+                return start.includes(':') ? start : `${start}:00`;
+            }
+            return match[0]; // Якщо це одиночний час
+        }
+        return null;
+    }
+
+    return extractTime(str);
+}
+
+function parseDateFromString(text) {
+    // Регулярний вираз:
+    // \d{1,2}     - 1 або 2 цифри для дня
+    // [.\-/]      - роздільник: крапка, дефіс або слеш
+    // \d{1,2}     - 1 або 2 цифри для місяця
+    // [.\-/]      - той самий набір роздільників
+    // \d{2,4}     - від 2 до 4 цифр для року
+    const dateRegex = /\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})\b/g;
+
+    const matches = [...text.matchAll(dateRegex)];
+
+    return matches.map(match => {
+        return {
+            fullDate: match[0],
+            day: match[1],
+            month: match[2],
+            year: match[3]
+        };
+    });
+}
+
+const extractDate = (str) => {
+    const dates = parseDateFromString(str);
+    return dates.length ? (+dates[0].year < 2000 ? String(+dates[0].year + 2000) : dates[0].year) + '.' + dates[0].month + '.' + dates[0].day : null;
+}
+
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
     date.setDate(date.getDate() + days);
@@ -150,6 +199,7 @@ Date.prototype.endOfSecond = function() {
 module.exports = {
     isTrue,
     isFalse,
+    isNumeric,
     str2params,
     date2int,
     date2text,
@@ -159,5 +209,6 @@ module.exports = {
     extractUserTitle,
     occurrences,
     extractStartTime,
+    extractDate,
     normalizeParsedDate
 };

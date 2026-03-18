@@ -98,7 +98,9 @@ class Database {
                 {
                     $or: [
                         { date: { $lte: date }, isDateWithoutTime: false },
-                        { date: { $lt: startOfDate }, isDateWithoutTime: { $ne: false } }
+                        { date: { $lt: startOfDate }, isDateWithoutTime: { $ne: false } },
+                        // якщо ігра без дати проведення, то рахуємо її активною протягом тижня від створення
+                        { date: null, createdDate: { $lt: startOfDate.addDays(-7) } }
                     ]
                 }
             ]
@@ -123,7 +125,7 @@ class Database {
     async getActiveGamesWithSettings(dateStart) {
         return await this.gamesCollection().aggregate([
             {
-                $match: { isActive: true, date: { $gte: dateStart } }
+                $match: { isActive: true, date: { $gte: dateStart }, isDateWithoutTime: false }
             },
             {
                 $lookup: {

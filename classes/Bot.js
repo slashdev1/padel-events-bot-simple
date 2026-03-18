@@ -9,7 +9,9 @@ const {
     extractUserTitle,
     occurrences,
     isTrue,
+    isNumeric,
     extractStartTime,
+    extractDate,
     normalizeParsedDate
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
@@ -136,7 +138,9 @@ class Bot {
         if (!(chatId < 0)) {
             return this.replyToUserDirectOrDoNothing(ctx, this.emoji.err + 'Ця команда доступна тільки для груп!');
         }
-        let [cmdName, ...args] = str2params(ctx.message.text);
+
+        const msgText = ctx.message.text;
+        let [cmdName, ...args] = str2params(msgText);
         cmdName = cmdName.slice(1);
 
         let chatSettings = await this.database.getChatSettings(chatId);
@@ -152,25 +156,58 @@ class Bot {
                 return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
         }
 
-        if (args.length < 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
-        if (args.length > 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана некоректа кількість параметрів. ' + (occurrences(ctx.message.text, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '') + this.botCommands[cmdName].example);
+        const onlyGameName = (args.length != 3 || !isNumeric(args[2]));
+        if (!onlyGameName)
+            if (args.length < 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
+            else if (args.length > 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана некоректа кількість параметрів. ' + (occurrences(msgText, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '') + this.botCommands[cmdName].example);
 
-        const name = args[0];
-        let stringDate = args[1];
-        if (stringDate.match(/\d+/g).length === 3) {
-            const time = extractStartTime(name);
-            if (time) stringDate += ' ' + time;
+        let name;
+        let maxPlayers;
+        let date;
+        let isDateWithoutTime;
+        if (onlyGameName) {
+            const index = msgText.indexOf(' ');
+            if (index == -1) return this.replyOrDoNothing(ctx, 'Не вказана назва гри.');
+
+            name = msgText.substring(index + 1);
+            isDateWithoutTime = true;
+            let stringDate = extractDate(name);
+            if (stringDate && stringDate.match(/\d+/g).length === 3) {
+                const time = extractStartTime(name);
+                if (time) stringDate += ' ' + time;
+            }
+            if (stringDate) {
+                let parsedDate;
+                if (chatSettings.timezone) {
+                    const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T');
+                    parsedDate = Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.timezone}]`).toInstant().toString();
+                } else parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
+                if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+                date = new Date(parsedDate);
+
+                isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
+            }
+        } else {
+            name = args[0];
+            let stringDate = args[1];
+            if (stringDate.match(/\d+/g).length === 3) {
+                const time = extractStartTime(name);
+                if (time) stringDate += ' ' + time;
+            }
+            //const parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
+            let parsedDate;
+            if (chatSettings.timezone) {
+                const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T');
+                parsedDate = Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.timezone}]`).toInstant().toString();
+            } else parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
+            if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+            date = new Date(parsedDate);
+
+            maxPlayers = parseInt(args[2]);
+            if (!maxPlayers || maxPlayers <= 0) return this.replyOrDoNothing(ctx, 'Кількість ігроків повинно бути числом більше 0.');
+
+            isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
         }
-        //const parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
-        let parsedDate;
-        if (chatSettings.timezone) {
-            const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T');
-            parsedDate = Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.timezone}]`).toInstant().toString();
-        } else parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
-        if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
-
-        let maxPlayers = parseInt(args[2]);
-        if (!maxPlayers || maxPlayers <= 0) return this.replyOrDoNothing(ctx, 'Кількість ігроків повинно бути числом більше 0.');
 
         const creatorId = ctx.from.id;
         const creatorName = extractUserTitle(ctx.from, false);
@@ -182,9 +219,9 @@ class Bot {
             isActive: true,
             chatId,
             name,
-            date: new Date(parsedDate),
-            isDateWithoutTime: stringDate.match(/\d+/g).length < 4,
-            maxPlayers: parseInt(args[2]),
+            date,
+            isDateWithoutTime,
+            maxPlayers,
             players: []
         };
         console.log(`Now ${new Date()}`);
@@ -364,13 +401,16 @@ class Bot {
                 if (gameDate && gameDate + 86400000 < Date.now()) return;
                 let status = (chatId < 0) ? ' Ще не має статусу' : '';
                 let ind = game.players.filter(p => p.status === 'joined').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).findIndex(p => p.id === userId);
-                if (ind >= 0 && ind < game.maxPlayers) status = '✅ Йду';
-                if (ind >= 0 && ind >= game.maxPlayers) status = '⏳ У черзі';
+                let limit = game.maxPlayers || Infinity;
+                if (ind >= 0 && ind < limit) status = '✅ Йду';
+                if (ind >= 0 && ind >= limit) status = '⏳ У черзі';
                 if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
                 if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
                 if (game.players.some(p => p.id === userId && p.status === 'kicked')) status = "🦶 Вас виключено";
-                if (status)
-                    lines.push({gameDate, text: `📅 **${game.name} (${date2text(game.date)})** - ${status}`});
+                if (status) {
+                    let dateText = game.date ? ` (${date2text(game.date)})` : '';
+                    lines.push({gameDate, text: `📅 ${game.name}${dateText} - ${status}`});
+                }
             });
             if (lines.length) {
                 lines.sort((a, b) => (a.gameDate || 0) - (b.gameDate || 0));
@@ -434,15 +474,17 @@ class Bot {
         //     (user.extraPlayer ? '(+' + user.extraPlayer + ')': '');
         const m = (user) => {
             const flag = user.name[0] == '@';
-            return user.fullName ? ((flag ? '[' : '') + user.fullName + (flag ? ']' : '') + (flag ? `(https://t.me/${user.name.slice(1)})` : '')) : ((!flag && user.name.indexOf(' ') == -1 ? '@' : '') + user.name) +
-                (user.extraPlayer ? '(+' + user.extraPlayer + ')' : '');
+            const extra = (user.extraPlayer ? ' (+)' : '');
+            return user.fullName ? ((flag ? '[' : '') + user.fullName + extra + (flag ? ']' : '') + (flag ? `(https://t.me/${user.name.slice(1)})` : '')) : ((!flag && user.name.indexOf(' ') == -1 ? '@' : '') + user.name + extra);
         };
+        const limit = game.maxPlayers || Infinity;
+        const dateText = game.date ? ` (${date2text(game.date)})` : '';
         return textMarkdownNormalize(
             (!game.isActive ? '‼️ НЕАКТИВНА ‼️\n\n' : '') +
-            `📅 **${game.name} (${date2text(game.date)})**\n\n` +
-            `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}/${game.maxPlayers}\n` +
-            `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, game.maxPlayers).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
-            `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(game.maxPlayers).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
+            `📅 ${game.name}${dateText}\n\n` +
+            `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}${game.maxPlayers ? '/' + game.maxPlayers : ''}\n` +
+            `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, limit).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
+            `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(limit).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
             `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
             `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n\n` +
             `✍️ Опубліковано ${game.createdByName}`
@@ -454,8 +496,8 @@ class Bot {
             Markup.button.callback('✅ Йду', `join_${gameId}`),
             Markup.button.callback('❓ Подумаю', `pending_${gameId}`),
             Markup.button.callback('❌ Не йду', `decline_${gameId}`),
-            Markup.button.callback('✅ Йду +', `join_${gameId}_plus`),
-            Markup.button.callback('❌ Не йду -', `decline_${gameId}_minus`)
+            Markup.button.callback('✅ +1', `join_${gameId}_plus`),
+            Markup.button.callback('❌ -1', `decline_${gameId}_minus`)
         ], {columns: 3});
     }
 
@@ -481,7 +523,7 @@ class Bot {
     }
 
     async replyToUser(ctx, message) {
-        const replyWarning = (ctx) => this.replyOrDoNothing(ctx, `Для отримання повідомлень від бота перейдіть на нього ${this.botUrl} та натисніть Start.`);
+        //const replyWarning = (ctx) => this.replyOrDoNothing(ctx, `Для отримання повідомлень від бота перейдіть на нього ${this.botUrl} та натисніть Start.`);
         const userId = ctx.from.id;
         const user = await this.database.getUser(userId);
         if (user && user.started) {
@@ -489,13 +531,13 @@ class Bot {
                 await this.bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
             } catch (error) {
                 if (error?.code === 403) {
-                    replyWarning(ctx);
+                    //replyWarning(ctx);
                     await this.database.updateUser({...ctx.from, started: false, startedTimestamp: new Date()});
                 } else
                     this.replyOrDoNothing(ctx, message);
             }
-        } else
-            replyWarning(ctx);
+        } //else
+            //replyWarning(ctx);
     }
 
     async replyToUserDirectOrDoNothing(ctx, message) {
@@ -583,7 +625,7 @@ class Bot {
             notificationTerms: config.notificationTerms
         }
         if (!chatSettings.allMembersAreAdministrators) {
-            const admins = await this.bot.telegram.getChatAdministrators(chatId);
+            const admins = chatId < 0 && await this.bot.telegram.getChatAdministrators(chatId);
             if (admins && admins.length) {
                 chatSettings.admins = admins.map(adm => {
                     return {
@@ -605,6 +647,8 @@ class Bot {
     }
 
     // TODO: add features/limits (maxNotifiactionTerms: 2)
+
+    // TODO: notify users (like group chat)
 
     hasPermission(chatSettings, cmdName, userId, createdById, valueIfNoFoundCommand = true) {
         const cmdPermission = chatSettings.permissions.find(elem => elem.command === cmdName);
