@@ -143,6 +143,7 @@ class Database {
                     date: 1,
                     chatId: 1,
                     messageId: 1,
+                    players: 1,
                     //sentReminders: 1,
                     notificationTerms: '$chatSettings.notificationTerms',
                     license: '$chatSettings.license'

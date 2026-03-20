@@ -10,9 +10,6 @@ class Scheduler {
 
     start() {
         this.scheduleGameDeactivation();
-        // this.scheduleDailyReminders();
-        // this.scheduleTodayReminders();
-        // this.scheduleOneHourBeforeReminders();
         this.scheduleDynamicReminders();
     }
 
@@ -27,41 +24,6 @@ class Scheduler {
         });
         this.jobs.push(job);
     }
-
-    // scheduleDailyReminders() {
-    //     const job = cron.schedule('0 16 * * *', async () => {
-    //         await this.sendNotification(
-    //             new Date().addDays(1).startOfDay(),
-    //             new Date().addDays(1).endOfDay(),
-    //             'Завтра'
-    //         );
-    //     });
-    //     this.jobs.push(job);
-    // }
-
-    // scheduleTodayReminders() {
-    //     const job = cron.schedule('00 6 * * *', async () => {
-    //         await this.sendNotification(
-    //             new Date().startOfDay(),
-    //             new Date().endOfDay(),
-    //             'Сьогодні',
-    //             true
-    //         );
-    //     });
-    //     this.jobs.push(job);
-    // }
-
-    // scheduleOneHourBeforeReminders() {
-    //     const job = cron.schedule('*/5 * * * *', async () => {
-    //         await this.sendNotification(
-    //             new Date().addMinutes(60).startOfSecond(),
-    //             new Date().addMinutes(64).endOfSecond(),
-    //             'За годину',
-    //             true
-    //         );
-    //     });
-    //     this.jobs.push(job);
-    // }
 
     scheduleDynamicReminders() {
         const job = cron.schedule(`*/${this.checkInterval} * * * *`, async () => {
@@ -78,29 +40,53 @@ class Scheduler {
             const activeGames = await this.database.getActiveGamesWithSettings(now);
 
             for (const game of activeGames) {
+                // 1. Нотифікації для груп
                 let termsString = game.notificationTerms;
                 if (termsString === '') {
                     // Якщо поле notificationTerms присутнє і воно пусте, це означає що не треба нагадувань
-                    continue;
+                } else {
+                    // Якщо налаштування не задані, використовуємо дефолт (наприклад, за добу та за годину)
+                    termsString = termsString || "-1440,-60";
+                    const terms = termsString.split(',').map(Number);
+
+                    for (const minutesBefore of terms) {
+                        // // Перевіряємо, чи ми вже не надсилали САМЕ ЦЕ нагадування
+                        // if (game.sentReminders && game.sentReminders.includes(minutesBefore)) {
+                        //     continue;
+                        // }
+
+                        // Рахуємо час, коли має спрацювати нагадування
+                        // Оскільки minutesBefore від'ємні (наприклад, -60), додаємо їх
+                        const reminderTime = new Date(game.date.getTime() + minutesBefore * 60000);
+                        const timeWindowEnd = new Date(reminderTime.getTime() + this.checkInterval * 60000);
+
+                        // Якщо поточний час більший або рівний часу нагадування
+                        if (now >= reminderTime && now < timeWindowEnd) {
+                            await this.sendDynamicNotification(game, minutesBefore);
+                        }
+                    }
                 }
-                // Якщо налаштування не задані, використовуємо дефолт (наприклад, за добу та за годину)
-                termsString = termsString || "-1440,-60";
-                const terms = termsString.split(',').map(Number);
 
-                for (const minutesBefore of terms) {
-                    // // Перевіряємо, чи ми вже не надсилали САМЕ ЦЕ нагадування
-                    // if (game.sentReminders && game.sentReminders.includes(minutesBefore)) {
-                    //     continue;
-                    // }
+                // 2. Нотифікації для ігроків
+                const userIds = [...new Set(game.players.filter(p => p.status === 'joined').map(p => p.id))];
+                for (const userId of userIds) {
+                    let user = await this.database.getUser(userId);
+                    if (!user || !user.started) continue;
 
-                    // Рахуємо час, коли має спрацювати нагадування
-                    // Оскільки minutesBefore від'ємні (наприклад, -60), додаємо їх
-                    const reminderTime = new Date(game.date.getTime() + minutesBefore * 60000);
-                    const timeWindowEnd = new Date(reminderTime.getTime() + this.checkInterval * 60000);
+                    termsString = user.notificationTerms;
+                    if (termsString === '') continue;
 
-                    // Якщо поточний час більший або рівний часу нагадування
-                    if (now >= reminderTime && now < timeWindowEnd) {
-                        await this.sendDynamicNotification(game, minutesBefore);
+                    termsString = termsString || "-1440,-60";
+                    const terms = termsString.split(',').map(Number);
+
+                    for (const minutesBefore of terms) {
+                        const reminderTime = new Date(game.date.getTime() + minutesBefore * 60000);
+                        const timeWindowEnd = new Date(reminderTime.getTime() + this.checkInterval * 60000);
+
+                        // Якщо поточний час більший або рівний часу нагадування
+                        if (now >= reminderTime && now < timeWindowEnd) {
+                            await this.sendDynamicNotificationToUser(game, user, minutesBefore);
+                        }
                     }
                 }
             }
@@ -128,6 +114,24 @@ class Scheduler {
             } else {
                 console.error(`[Telegram Error] Chat ${game.chatId}:`, error.message);
             }
+        }
+    }
+
+    async sendDynamicNotificationToUser(game, user, minutesBefore) {
+        if (!user.started) return;
+
+        const timeText = this.formatMinutesText(minutesBefore);
+        const replyText = `🔔 Нагадування\n\nГра "${game.name}" відбудеться ${timeText}!`;
+        console.log(`Відправка користувачу ${user.userId} повідомлення ${replyText}`);
+
+        try {
+            await this.bot.sendMessage(user.userId, replyText);
+        } catch (error) {
+            if (error?.code === 403) {
+                await this.database.updateUser({id: user.userId, started: false, startedTimestamp: new Date()});
+                return;
+            }
+            console.error(`[Telegram Error] Chat ${user.userId}:`, error.message);
         }
     }
 
@@ -183,24 +187,6 @@ class Scheduler {
         // Для всіх інших (0, 5-9)
         return many;
     }
-
-    // async sendNotification(dateStart, dateEnd, whenText, onlyIfDateWithTime = false) {
-    //     const games = await this.database.getGamesForNotification(
-    //         dateStart,
-    //         dateEnd,
-    //         onlyIfDateWithTime
-    //     );
-
-    //     games.forEach(async (game) => {
-    //         let replyText = `🔔 Нагадування\n\n${whenText} відбудеться гра ${game.name}.`;
-    //         try {
-    //             await this.bot.sendMessage(game.chatId, replyText, { reply_to_message_id: game.messageId });
-    //         } catch (error) {
-    //             if (error.description.includes('message to be replied not found')) // 400: Bad Request: message to be replied not found
-    //                 await this.bot.sendMessage(game.chatId, replyText);
-    //         }
-    //     });
-    // }
 }
 
 module.exports = Scheduler;

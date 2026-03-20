@@ -61,11 +61,17 @@ class Bot {
 
             if (newStatus === 'kicked' || newStatus === 'left') {
                 console.log(`Бот вилучений з чату ${chatId}`);
-                this.database.updateChatSettings({ chatId, botStatus: newStatus });
+                if (chatId < 0)
+                    this.database.updateChatSettings({ chatId, botStatus: newStatus });
+                else
+                    console.log('!!!???');
             } else if (newStatus === 'member') {
                 console.log(`Бот доданий до чату ${chatId}`);
-                this.database.updateChatSettings({ chatId, botStatus: newStatus }, async () => await this.makeChatSettings(chatId, ctx));
-                this.replyOrDoNothing(ctx, 'Привіт! Дякую за додавання мене до групи.');
+                if (chatId < 0) {
+                    this.database.updateChatSettings({ chatId, botStatus: newStatus }, async () => await this.makeChatSettings(chatId, ctx));
+                    this.replyOrDoNothing(ctx, 'Привіт! Дякую за додавання мене до групи.');
+                } else
+                    console.log('!!!???');
             }
         });
     }
