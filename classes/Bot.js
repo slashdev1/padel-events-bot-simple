@@ -69,21 +69,21 @@ class Bot {
                 if (chatId < 0)
                     this.database.updateChatSettings({ chatId, botStatus: newStatus });
                 else
-                    console.log('!!!???');
+                    this.database.updateUser({ id: chatId, started: false });
             } else if (newStatus === 'member') {
                 console.log(`Бот доданий до чату ${chatId}`);
                 if (chatId < 0) {
                     this.database.updateChatSettings({ chatId, botStatus: newStatus }, async () => await this.makeChatSettings(chatId, ctx));
                     this.replyOrDoNothing(ctx, 'Привіт! Дякую за додавання мене до групи.');
                 } else
-                    console.log('!!!???');
+                    this.database.updateUser({ id: chatId, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings() });
             }
         });
     }
 
     async handleStart(ctx) {
         const user = ctx.from;
-        await this.database.updateUser({...user, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings()});
+        await this.database.updateUser({ ...user, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings() });
         let message = this.botCommands['start']?.description;
         if (!message) return;
         let tpl = eval('`'+message+'`');
@@ -523,9 +523,10 @@ class Bot {
         // const m = (user) => (user.name[0] != '@' && user.name.indexOf(' ') == -1 ? '@' : '') + user.name +
         //     (user.extraPlayer ? '(+' + user.extraPlayer + ')': '');
         const m = (user) => {
-            const flag = user.name[0] == '@';
+            //const flag = user.name[0] == '@';
             const extra = (user.extraPlayer ? ' (+)' : '');
-            return user.fullName ? ((flag ? '[' : '') + user.fullName + extra + (flag ? ']' : '') + (flag ? `(https://t.me/${user.name.slice(1)})` : '')) : ((!flag && user.name.indexOf(' ') == -1 ? '@' : '') + user.name + extra);
+            return `[${user.fullName || user.name}${extra}](tg://user?id=${user.id})`;
+            //return user.fullName ? ((flag ? '[' : '') + user.fullName + extra + (flag ? ']' : '') + (flag ? `(tg://user?id=${user.id})` : '')) : ((!flag && user.name.indexOf(' ') == -1 ? '@' : '') + user.name + extra);
         };
         const limit = game.maxPlayers || Infinity;
         const dateText = game.date ? ` (${date2text(game.date)})` : '';
@@ -582,7 +583,7 @@ class Bot {
             } catch (error) {
                 if (error?.code === 403) {
                     //replyWarning(ctx);
-                    await this.database.updateUser({...ctx.from, started: false, startedTimestamp: new Date()});
+                    await this.database.updateUser({ ...ctx.from, started: false });
                 } else
                     this.replyOrDoNothing(ctx, message);
             }
@@ -599,12 +600,12 @@ class Bot {
             sent = true;
         } catch (error) {
             if (error?.code === 403) {
-                await this.database.updateUser({...ctx.from, started: false, startedTimestamp: new Date()});
+                await this.database.updateUser({ ...ctx.from, started: false });
                 return;
             }
             console.error(error);
         }
-        if (sent && !user?.started) await this.database.updateUser({...ctx.from, started: true, startedTimestamp: new Date()});
+        if (sent && !user?.started) await this.database.updateUser({ ...ctx.from, started: true, startedTimestamp: new Date() });
     }
 
     async replyOrDoNothing(ctx, message, extra) {
@@ -613,10 +614,6 @@ class Bot {
         } catch (error) {
             console.error(error);
         }
-    }
-
-    async sendMessage_old(chatId, message, options = {}) {
-        return await this.bot.telegram.sendMessage(chatId, message, options);
     }
 
     async sendMessage(chatId, message, options = {}) {
@@ -752,10 +749,6 @@ class Bot {
         }
         return false;
     }
-
-    // TODO: add features/limits (maxNotifiactionTerms: 2)
-
-    // TODO: notify users (like group chat)
 
     hasPermission(chatSettings, cmdName, userId, createdById, valueIfNoFoundCommand = true) {
         const cmdPermission = chatSettings.permissions.find(elem => elem.command === cmdName);

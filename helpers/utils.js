@@ -142,25 +142,6 @@ const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_'
 
 const extractUserTitle = (user, useUserName) => user.username && useUserName !== false ? '@' + user.username : (user.first_name + ' ' + (user.last_name || '')).trim();
 
-const extractStartTime_old = (str) => {
-    const extractTime = (str) => {
-        const regex = /(\d{1,2}:\d{2})-(\d{1,2}:\d{2})|(\d{1,2}-\d{1,2}:\d{2})|(\d{1,2}:\d{2})/g;
-        const matches = str.match(regex);
-        if (matches) {
-            // Обробка випадку з 7-9:00, де match[0] буде "7-9:00"
-            if (matches[0].includes('-') && matches[0].split('-').indexOf(':') === -1) {
-            const parts = matches[0].split('-');
-            return `${parts[0]}:00-${parts[1]}`;
-            }
-            return matches.join(' ');
-        }
-        return null;
-    }
-    let time = extractTime(str);
-    if (!time) return;
-    return time.split('-')[0];
-}
-
 const extractStartTime = (str) => {
     const extractTime = (str) => {
         const divider = /\s*[-—–]\s*/.source;

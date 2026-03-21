@@ -174,7 +174,7 @@ class Database {
         if ('first_name' in userData) fields.firstName = userData.first_name;
         if ('last_name' in userData) fields.lastName = userData.last_name;
         if ('username' in userData) fields.username = userData.username;
-        userData.updatedDate = new Date();
+        fields.updatedDate = new Date();
         const fieldsForInsert = {};
         if ('settings' in userData) {
             const transformed = Object.entries(userData.settings).reduce((acc, [key, value]) => {

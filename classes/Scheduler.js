@@ -128,7 +128,7 @@ class Scheduler {
             await this.bot.sendMessage(user.userId, replyText);
         } catch (error) {
             if (error?.code === 403) {
-                await this.database.updateUser({id: user.userId, started: false, startedTimestamp: new Date()});
+                await this.database.updateUser({ id: user.userId, started: false });
                 return;
             }
             console.error(`[Telegram Error] Chat ${user.userId}:`, error.message);
