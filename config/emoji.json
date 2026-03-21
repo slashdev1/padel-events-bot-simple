@@ -2,5 +2,6 @@
     "warn": "⚠️",
     "noaccess": "🚫",
     "err": "❗",
-    "notif": "🔔"
+    "notif": "🔔",
+    "info": "ℹ️"
 }

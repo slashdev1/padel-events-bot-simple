@@ -73,7 +73,7 @@ class Scheduler {
                     let user = await this.database.getUser(userId);
                     if (!user || !user.started) continue;
 
-                    termsString = user.notificationTerms;
+                    termsString = user.settings && user.settings.notificationTerms;
                     if (termsString === '') continue;
 
                     termsString = termsString || "-1440,-60";

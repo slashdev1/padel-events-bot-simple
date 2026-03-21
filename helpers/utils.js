@@ -10,6 +10,55 @@ const str2params = (str) => str/*.match(/\\?.|^$/g)*/.split('').reduce((p, c) =>
     return p;
 }, { a: [''] }).a;
 
+const parseArgs = (input) => {
+    const result = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < input.length; i++) {
+        const char = input[i];
+
+        if (char === '"') {
+        inQuotes = !inQuotes; // Перемикаємо стан "всередині лапок"
+        current += char;
+        } else if (char === ' ' && !inQuotes) {
+        // Якщо пробіл і ми НЕ в лапках — це кінець аргументу
+        if (current.length > 0) {
+            result.push(current);
+            current = "";
+        }
+        } else {
+        // Будь-який інший символ (включаючи пробіли всередині лапок)
+        current += char;
+        }
+    }
+
+    // Додаємо останній назбираний фрагмент
+    if (current.length > 0) {
+        result.push(current);
+    }
+
+    // Обробка умови: якщо параметр починається ТА закінчується на ", прибираємо їх
+    return result.map(arg => {
+        if (arg.startsWith('"') && arg.endsWith('"') && arg.length >= 2) {
+        return arg.substring(1, arg.length - 1);
+        }
+        return arg;
+    });
+}
+
+const strBefore = (str, delimiter) => {
+    const index = str.indexOf(delimiter);
+    if (index === -1) return '';
+    return str.substring(0, index);
+}
+
+const strAfter = (str, delimiter) => {
+    const index = str.indexOf(delimiter);
+    if (index === -1) return '';
+    return str.substring(index + delimiter.length);
+}
+
 /** Function that count occurrences of a substring in a string;
  * @param {String} string               The string
  * @param {String} subString            The sub string to search for
@@ -210,5 +259,8 @@ module.exports = {
     occurrences,
     extractStartTime,
     extractDate,
-    normalizeParsedDate
+    normalizeParsedDate,
+    parseArgs,
+    strBefore,
+    strAfter
 };

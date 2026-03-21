@@ -12,7 +12,10 @@ const {
     isNumeric,
     extractStartTime,
     extractDate,
-    normalizeParsedDate
+    normalizeParsedDate,
+    parseArgs,
+    strBefore,
+    strAfter
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
 
@@ -41,6 +44,8 @@ class Bot {
         this.bot.command('change_game', this.handleChangeGame.bind(this));
         this.bot.command('kick', this.handleKickFromGame.bind(this));
         this.bot.command('active_games', this.handleActiveGames.bind(this));
+        this.bot.command('settings', this.handleSettings.bind(this));
+        this.bot.command('change_settings', this.handleChangeSettings.bind(this));
         this.bot.command('__ver', this.handleGetVersion.bind(this));
         this.bot.command('__time', this.handleTime.bind(this));
         this.bot.command('__send_to', this.handleSendTo.bind(this));
@@ -78,7 +83,7 @@ class Bot {
 
     async handleStart(ctx) {
         const user = ctx.from;
-        await this.database.updateUser({...user, started: true, startedTimestamp: new Date()});
+        await this.database.updateUser({...user, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings()});
         let message = this.botCommands['start']?.description;
         if (!message) return;
         let tpl = eval('`'+message+'`');
@@ -426,6 +431,45 @@ class Bot {
         this.replyToUser(ctx, response);
     }
 
+    async handleSettings(ctx) {
+        if (ctx.chat.id < 0) return; // Ця команда тільки для чату користувача
+        const userId = ctx.from.id;
+        const user = await this.database.getUserFromDB(userId);
+        try {
+            await this.bot.telegram.sendMessage(userId, JSON.stringify(user.settings || {}, null, 2));
+        } catch (error) {
+            console.error(`[Telegram Error] Chat ${userId}:`, error.message);
+        }
+    }
+
+    async handleChangeSettings(ctx) {
+        if (ctx.chat.id < 0) return; // Ця команда тільки для чату користувача
+        const userId = ctx.from.id;
+        let [_, ...args] = parseArgs(ctx.message.text);
+        if (args.length != 1) return await this.sendMessage(userId, this.emoji.warn + 'Передана некоректа кількість параметрів.');
+        const key = strBefore(args[0], '=');
+        const value = strAfter(args[0], '=');
+        if (key in ['timezone', 'notificationTerms']) return await this.sendMessage(userId, this.emoji.warn + 'Передана некоректе им\'я налаштування.');
+        let keyValueObj;
+        try {
+            keyValueObj = JSON.parse('{"' + key + '":' + value + '}');
+        } catch (error) {
+            console.error(error);
+            await this.sendMessage(userId, this.emoji.warn + 'Некоректне значення налаштування.');
+            return;
+        }
+        if (key === 'timezone') {
+            let timeZones = Intl.supportedValuesOf('timeZone');
+            timeZones.push('Europe/Kyiv'); // тому що у цьому списку може бути тільки "Europe/Kiev"
+            if (!timeZones.find(v => v === keyValueObj[key])) {
+                await this.sendMessage(userId, this.emoji.warn + 'Некоректне значення налаштування. Доспупні значення: ' + JSON.stringify(timeZones));
+                return;
+            }
+        }
+        await this.database.updateUser({ ...ctx.from, settings: keyValueObj }, true);
+        await this.sendMessage(userId, this.emoji.info + `Налаштування ${key} оновлене.`);
+    }
+
     async updateGameStatus(ctx, action) {
         const [gameId, extraAction] = ctx.match[1].split('_');
         const userId = ctx.from.id;
@@ -571,8 +615,57 @@ class Bot {
         }
     }
 
-    async sendMessage(chatId, message, options = {}) {
+    async sendMessage_old(chatId, message, options = {}) {
         return await this.bot.telegram.sendMessage(chatId, message, options);
+    }
+
+    async sendMessage(chatId, message, options = {}) {
+        const MAX_LENGTH = 4000;
+
+        // Якщо повідомлення коротке — надсилаємо одразу
+        if (message.length <= MAX_LENGTH) {
+            return await this.bot.telegram.sendMessage(chatId, message, options);
+        }
+
+        const chunks = [];
+        let currentChunk = "";
+
+        // Розбиваємо за рядками, щоб зберегти читабельність
+        const lines = message.split('\n');
+
+        for (const line of lines) {
+            // Перевірка: чи не задовгий сам рядок (якщо один рядок > 4000)
+            if (line.length > MAX_LENGTH) {
+                // Якщо рядок гігантський, ріжемо його примусово по символах
+                const subChunks = line.match(new RegExp(`.{1,${MAX_LENGTH}}`, 'g'));
+                chunks.push(...subChunks);
+                continue;
+            }
+
+            if ((currentChunk + line).length > MAX_LENGTH) {
+                chunks.push(currentChunk);
+                currentChunk = line + "\n";
+            } else {
+                currentChunk += line + "\n";
+            }
+        }
+
+        if (currentChunk.trim().length > 0) {
+            chunks.push(currentChunk);
+        }
+
+        // Надсилаємо всі частини по черзі
+        const responses = [];
+        for (const chunk of chunks) {
+            const res = await this.bot.telegram.sendMessage(chatId, chunk.trim(), options);
+            responses.push(res);
+
+            // Невелика затримка, щоб уникнути Flood Wait від Telegram API
+            // (актуально для дуже великих текстів на 10+ частин)
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        return responses; // Повертаємо масив відповідей від API
     }
 
     async launch(config, onLaunch) {
@@ -615,8 +708,16 @@ class Bot {
         }
     }
 
+    getDefaultSettings() {
+        return {
+            license: this.config.licenseClientDefault || 'free',
+            timezone: this.config.timezoneClientDefault,
+            notificationTerms: this.config.notificationTerms || '-1440,-60'
+        };
+    }
+
     async makeChatSettings(chatId, ctx) {
-        const config = { license: this.config.licenseClientDefault || 'free', timezone: this.config.timezoneClientDefault, notificationTerms: this.config.notificationTerms || '-1440,-60' };
+        const config = this.getDefaultSettings();
         const chatSettings = {
             chatId,
             chatName: ctx.chat.title,

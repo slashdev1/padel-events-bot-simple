@@ -157,12 +157,16 @@ class Database {
         const cacheKey = `User:${userId}`;
         return await this.cache.getOrSet(
             cacheKey,
-            async () => await this.usersCollection().findOne({ userId }),
+            async () => this.getUserFromDB(userId), //await this.usersCollection().findOne({ userId }),
             this.ttlUserDataMs
         );
     }
 
-    async updateUser(userData) {
+    async getUserFromDB(userId) {
+        return await this.usersCollection().findOne({ userId });
+    }
+
+    async updateUser(userData, force) {
         const fields = {};
         if ('id' in userData) fields.userId = userData.id;
         if ('started' in userData) fields.started = userData.started;
@@ -170,10 +174,21 @@ class Database {
         if ('first_name' in userData) fields.firstName = userData.first_name;
         if ('last_name' in userData) fields.lastName = userData.last_name;
         if ('username' in userData) fields.username = userData.username;
+        userData.updatedDate = new Date();
+        const fieldsForInsert = {};
+        if ('settings' in userData) {
+            const transformed = Object.entries(userData.settings).reduce((acc, [key, value]) => {
+                acc[`settings.${key}`] = value;
+                return acc;
+            }, {});
+            Object.assign(force === true ? fields : fieldsForInsert, transformed);
+        }
+        if ('createdDate' in userData) fieldsForInsert.createdDate = userData.createdDate;
 
         const result = await this.usersCollection().updateOne(
             { userId: userData.id },
             { $set: fields },
+            { $setOnInsert: fieldsForInsert},
             { upsert: true }
         );
         if (result?.acknowledged) {
