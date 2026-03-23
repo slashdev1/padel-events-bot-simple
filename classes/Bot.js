@@ -15,7 +15,9 @@ const {
     normalizeParsedDate,
     parseArgs,
     strBefore,
-    strAfter
+    strAfter,
+    extractPlayers,
+    parseDateWithTimezone
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
 
@@ -183,6 +185,10 @@ class Bot {
             name = msgText.substring(index + 1);
             isDateWithoutTime = true;
             let stringDate = extractDate(name);
+            if (!stringDate) {
+                // намагання отримати дату через слова, що мають сенс дати
+                stringDate = parseDateWithTimezone(name);
+            }
             if (stringDate && stringDate.match(/\d+/g).length === 3) {
                 const time = extractStartTime(name);
                 if (time) stringDate += ' ' + time;
@@ -198,6 +204,7 @@ class Bot {
 
                 isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
             }
+            maxPlayers = extractPlayers(msgText);
         } else {
             name = args[0];
             let stringDate = args[1];

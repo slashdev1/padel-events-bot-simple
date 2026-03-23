@@ -17,8 +17,6 @@ class PadelBotApp {
 
     async start() {
         console.log(`Date on server ${new Date()}`);
-        const dateString = Temporal.ZonedDateTime.from('2025-02-26T18:00[Europe/Kyiv]').toInstant().toString();
-        console.log(`dateString: ${dateString}`);
 
         // Connect to database
         await this.database.connect();

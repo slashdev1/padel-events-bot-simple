@@ -190,6 +190,74 @@ const extractDate = (str) => {
     return dates.length ? (+dates[0].year < 2000 ? String(+dates[0].year + 2000) : dates[0].year) + '.' + dates[0].month + '.' + dates[0].day : null;
 }
 
+const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
+    const input = text.toLowerCase();
+
+    // 1. Отримуємо поточний час саме у вказаній таймзоні
+    const nowInTZ = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
+    const currentDay = nowInTZ.getDay(); // 0 (нд) - 6 (сб)
+
+    const daysMap = {
+        0: ['неділя', 'воскресенье', 'неділю', '(^|\\s|[,.])(нд|вс)($|\\s|[,.])'],
+        1: ['понеділок', 'понедельник', '(^|\\s|[,.])(пн)($|\\s|[,.])'],
+        2: ['вівторок', 'вторник', '(^|\\s|[,.])(вт)($|\\s|[,.])'],
+        3: ['середа', 'среда', 'середу', 'среду', '(^|\\s|[,.])(ср)($|\\s|[,.])'],
+        4: ['четвер', 'четверг', '(^|\\s|[,.])(чт)($|\\s|[,.])'],
+        5: ['п’ятниця', 'пятница', 'п’ятницю', 'пятницу', '(^|\\s|[,.])(пт)($|\\s|[,.])'],
+        6: ['субота', 'суббота', 'суботу', 'субботу', '(^|\\s|[,.])(сб)($|\\s|[,.])']
+    };
+
+    let targetDate = new Date(nowInTZ);
+
+    // 2. Логіка "сьогодні / завтра"
+    if (/(сьогодні|сегодня)/.test(input)) {
+        // Залишаємо targetDate як є (сьогодні)
+    } else if (/(завтра)/.test(input)) {
+        targetDate.setDate(nowInTZ.getDate() + 1);
+    } else {
+        // 3. Пошук дня тижня
+        let foundDay = null;
+        for (let dayIndex in daysMap) {
+            const variants = daysMap[dayIndex];
+            const regex = new RegExp(`(${variants.join('|')})`, 'i');
+            if (regex.test(input)) {
+                foundDay = parseInt(dayIndex);
+                break;
+            }
+        }
+
+        if (foundDay !== null) {
+            // Рахуємо різницю днів
+            let daysDiff = (foundDay + 7 - currentDay) % 7;
+
+            // Якщо сьогодні субота і людина пише "субота", зазвичай це сьогодні.
+            // Але якщо ти хочеш, щоб "субота" в суботу означала "наступна субота",
+            // заміни умови нижче.
+            targetDate.setDate(nowInTZ.getDate() + daysDiff);
+        } else {
+            return null; // Дату не розпізнано
+        }
+    }
+
+    // Повертаємо чисту дату (рік-місяць-день) без залишків старого часу
+    //return targetDate.getDate().toISOString().split('T')[0];
+    return targetDate.getFullYear() + '-' + String(targetDate.getMonth() + 1).padStart(2, '0') + '-' + String(targetDate.getDate()).padStart(2, '0')
+}
+
+const extractPlayers = (input) => {
+    // Шукаємо число, за яким йдуть варіації слова "гравці"
+    const regex = /(\d+)\s*(грав|игрок|люд|челов)/i;
+    const match = input.match(regex);
+
+    if (match) {
+        return parseInt(match[1], 10); // match[1] — це саме число
+    }
+
+    // Якщо специфічних слів немає, можна шукати просто будь-яке число
+    // (але це ризиковано, бо може збігтися з часом 14-16)
+    return null;
+}
+
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
     date.setDate(date.getDate() + days);
@@ -240,8 +308,10 @@ module.exports = {
     occurrences,
     extractStartTime,
     extractDate,
+    parseDateWithTimezone,
     normalizeParsedDate,
     parseArgs,
     strBefore,
-    strAfter
+    strAfter,
+    extractPlayers
 };
