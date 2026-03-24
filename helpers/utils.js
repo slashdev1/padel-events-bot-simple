@@ -47,16 +47,32 @@ const parseArgs = (input) => {
     });
 }
 
-const strBefore = (str, delimiter) => {
-    const index = str.indexOf(delimiter);
+const strBefore = (str, delimiter, fromIndex = 0) => {
+    const index = str.indexOf(delimiter, fromIndex);
     if (index === -1) return '';
     return str.substring(0, index);
 }
 
-const strAfter = (str, delimiter) => {
-    const index = str.indexOf(delimiter);
+const strAfter = (str, delimiter, fromIndex = 0) => {
+    const index = str.indexOf(delimiter, fromIndex);
     if (index === -1) return '';
     return str.substring(index + delimiter.length);
+}
+
+const splitWithTail = (str, limit) => {
+    const parts = str.split(' ');
+
+    // Якщо частин менше або стільки ж, скільки ліміт — повертаємо як є
+    if (parts.length <= limit) return parts;
+
+    // Беремо перші (limit - 1) частин
+    const result = parts.slice(0, limit - 1);
+
+    // Все інше склеюємо назад через пробіл і кладемо в останній елемент
+    const tail = parts.slice(limit - 1).join(' ');
+    result.push(tail);
+
+    return result;
 }
 
 /** Function that count occurrences of a substring in a string;
@@ -313,5 +329,6 @@ module.exports = {
     parseArgs,
     strBefore,
     strAfter,
+    splitWithTail,
     extractPlayers
 };

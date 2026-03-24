@@ -221,13 +221,13 @@ class Database {
         const { chatId } = chatSettings;
         const chatSettingsFromDB = await this.getChatSettings(chatId);
         if (chatSettingsFromDB) {
-            const updateData = { ...chatSettingsFromDB, ...chatSettings };
+            const updateData = { ...chatSettingsFromDB, ...chatSettings, updatedDate: new Date() };
             await this.chatSettingsCollection().updateOne({ chatId }, { $set: updateData });
             const cacheKey = `chatSettings:${chatId}`;
             this.cache.set(cacheKey, updateData, this.ttlChatSettingsMs);
             return updateData;
         } else if (typeof fnMakeChatSettings === 'function') {
-            const updateData = { ...await fnMakeChatSettings(), ...chatSettings };
+            const updateData = { ...await fnMakeChatSettings(), ...chatSettings, updatedDate: new Date() };
             this.createChatSettings(updateData);
             return updateData;
         }

@@ -16,6 +16,7 @@ const {
     parseArgs,
     strBefore,
     strAfter,
+    splitWithTail,
     extractPlayers,
     parseDateWithTimezone
 } = require('../helpers/utils');
@@ -126,8 +127,41 @@ class Bot {
 
     async handleSendTo(ctx) {
         if (!await this.isSuperAdmin(ctx.from.id)) return;
-        let [_, ...args] = str2params(ctx.message.text);
-        this.replyToUserDirectOrDoNothing({ from: { id: parseInt(args[0]) } }, textMarkdownNormalize(args[1]));
+        //let [_, ...args] = str2params(ctx.message.text);
+        let [_, ...args] = splitWithTail(ctx.message.text, 3);
+        // this.replyToUserDirectOrDoNothing({ from: { id: parseInt(args[0]) } }, );
+
+        const userOrChatId = parseInt(args[0]);
+        if (userOrChatId === NaN) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передане некоректе id користувача/групи.');
+        const message = textMarkdownNormalize(args[1]);
+
+        let user, chat;
+        if (userOrChatId < 0)
+            chat = null;
+        else
+            user = await this.database.getUser(userOrChatId);
+
+        let sent = false;
+        try {
+            await this.sendMessage(userOrChatId, message, { parse_mode: 'Markdown' });
+            sent = true;
+        } catch (error) {
+            if ((error?.code || error?.response?.error_code) === 403) {
+                if (userOrChatId < 0)
+                    await this.database.updateChatSettings({ chatId: userOrChatId, botStatus: 'kicked/left' });
+                else
+                    await this.database.updateUser({ id: userOrChatId, started: false });
+                return;
+            } else if ((error?.code || error?.response?.error_code) === 400 && (error.response?.body?.description || error?.response?.description)?.includes('chat not found')) {
+                if (userOrChatId < 0)
+                    await this.database.updateChatSettings({ chatId: userOrChatId, status: 'not found' });
+                //else
+                //    await this.database.updateUser({ id: userOrChatId, started: false });
+                return;
+            }
+            console.error(error);
+        }
+        if (sent && user && !user?.started) await this.database.updateUser({ id: userOrChatId, started: true, startedTimestamp: new Date() });
     }
 
     async handleGetAdm(ctx) {
