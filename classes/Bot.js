@@ -127,14 +127,13 @@ class Bot {
 
     async handleSendTo(ctx) {
         if (!await this.isSuperAdmin(ctx.from.id)) return;
-        //let [_, ...args] = str2params(ctx.message.text);
         let [_, ...args] = splitWithTail(ctx.message.text, 3);
-        // this.replyToUserDirectOrDoNothing({ from: { id: parseInt(args[0]) } }, );
 
-        const userOrChatId = parseInt(args[0]);
-        if (userOrChatId === NaN) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передане некоректе id користувача/групи.');
+        const userOrChatId = parseInt(args[0], 10);
+        if (Number.isNaN(userOrChatId)) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передане некоректе id користувача/групи.');
         const message = textMarkdownNormalize(args[1]);
 
+        // TODO: !!!
         let user, chat;
         if (userOrChatId < 0)
             chat = null;
@@ -190,18 +189,17 @@ class Bot {
         let [cmdName, ...args] = str2params(msgText);
         cmdName = cmdName.slice(1);
 
-        let chatSettings = await this.database.getChatSettings(chatId);
-        if (!await this.isSuperAdmin(ctx.from.id)) {
-            if (!chatSettings) {
-                chatSettings = await this.makeChatSettings(chatId, ctx);
-                await this.database.createChatSettings(chatSettings);
-            }
+        const chatSettings = await this.database.getChatSettings(chatId) || {};
+        if (!await this.ensureAccess(ctx, ctx.from.id, chatId, null, cmdName, chatSettings)) return;
+        // if (!await this.isSuperAdmin(ctx.from.id)) {
+        //     if (!chatSettings) {
+        //         chatSettings = await this.makeChatSettings(chatId, ctx);
+        //         await this.database.createChatSettings(chatSettings);
+        //     }
 
-            if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
-                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
-            if (!this.hasPermission(chatSettings, cmdName, ctx.from.id))
-                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
-        }
+        //     if (!(await this.ensureCommandAccess(ctx, chatSettings, cmdName, ctx.from.id)))
+        //         return;
+        // }
 
         const onlyGameName = (args.length != 3 || !isNumeric(args[2]));
         if (!onlyGameName)
@@ -228,12 +226,8 @@ class Bot {
                 if (time) stringDate += ' ' + time;
             }
             if (stringDate) {
-                let parsedDate;
-                if (chatSettings.timezone) {
-                    const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T');
-                    parsedDate = Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.timezone}]`).toInstant().toString();
-                } else parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
-                if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+                const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
+                if (!parsedDate) return this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
                 date = new Date(parsedDate);
 
                 isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
@@ -246,13 +240,8 @@ class Bot {
                 const time = extractStartTime(name);
                 if (time) stringDate += ' ' + time;
             }
-            //const parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
-            let parsedDate;
-            if (chatSettings.timezone) {
-                const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T');
-                parsedDate = Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.timezone}]`).toInstant().toString();
-            } else parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
-            if (!parsedDate) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+            const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
+            if (!parsedDate) return this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
             date = new Date(parsedDate);
 
             maxPlayers = parseInt(args[2]);
@@ -300,17 +289,7 @@ class Bot {
         if (!game) return;
 
         const chatId = game.chatId;
-        if (!await this.isSuperAdmin(ctx.from.id)) {
-            let chatSettings = await this.database.getChatSettings(chatId);
-            if (!chatSettings && ctx.chat.id < 0) {
-                chatSettings = await this.makeChatSettings(chatId, ctx);
-                await this.database.createChatSettings(chatSettings);
-            }
-            if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
-                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
-            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id, game.createdById))
-                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
-        }
+        if (!await this.ensureAccess(ctx, ctx.from.id, chatId, game.createdById, cmdName)) return;
 
         if (!game.isActive) await this.database.deactivateGame(gameId);
         try {
@@ -339,17 +318,13 @@ class Bot {
         if (!game) return;
 
         const chatId = game.chatId;
-        let chatSettings = await this.database.getChatSettings(chatId);
-        if (!await this.isSuperAdmin(ctx.from.id)) {
-            if (!chatSettings && ctx.chat.id < 0) {
-                chatSettings = await this.makeChatSettings(chatId, ctx);
-                await this.database.createChatSettings(chatSettings);
-            }
-            if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
-                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
-            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id, game.createdById))
-                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
-        }
+        const chatSettings = await this.database.getChatSettings(chatId) || {};
+        if (!await this.ensureAccess(ctx, ctx.from.id, chatId, game.createdById, cmdName, chatSettings)) return;
+        // if (!await this.isSuperAdmin(ctx.from.id)) {
+        //     chatSettings = await this.getOrCreateChatSettings(ctx, chatId);
+        //     if (!(await this.ensureCommandAccess(ctx, chatSettings, cmdName, ctx.from.id, game.createdById)))
+        //         return;
+        // }
 
         const supportedParams = { name: null, players: null, date: null, active: null };
         for (let i = 0; i < args.length; i++) {
@@ -379,8 +354,9 @@ class Bot {
                 game.maxPlayers = updateData.maxPlayers;
             } else if (key === 'date') {
                 const stringDate = supportedParams[key];
+                //const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
                 const parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
-                if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"');
+                if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.invalidDateFormatMessage);
                 updateData.date = new Date(parsedDate);
                 game.date = updateData.date;
                 game.isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
@@ -408,17 +384,7 @@ class Bot {
         if (!game) return;
 
         const chatId = game.chatId;
-        if (!await this.isSuperAdmin(ctx.from.id)) {
-            let chatSettings = await this.database.getChatSettings(chatId);
-            if (!chatSettings && ctx.chat.id < 0) {
-                chatSettings = await this.makeChatSettings(chatId, ctx);
-                await this.database.createChatSettings(chatSettings);
-            }
-            if (!(await this.hasSuitedLicense(chatSettings, cmdName)))
-                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
-            if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, ctx.from.id, game.createdById, false))
-                return this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
-        }
+        if (!await this.ensureAccess(ctx, ctx.from.id, chatId, game.createdById, cmdName)) return;
 
         let player = args.shift();
         const filtered = game.players.filter(p => String(p.id) === player || p.name === player);
@@ -612,6 +578,48 @@ class Bot {
     async writeGameMessage(ctx, game, gameId) {
         if (!game) return;
         return await this.replyOrDoNothing(ctx, this.buildTextMessage(game), { parse_mode: 'Markdown', link_preview_options: {is_disabled: true}, ...this.buildMarkup(gameId) });
+    }
+
+    get invalidDateFormatMessage() {
+        return this.emoji.warn + 'Дату треба вказувати у такому форматі: 2025-03-25 або "2025-03-25 11:00"';
+    }
+
+    parseDateByChatSettings(stringDate, chatSettings = {}) {
+        if (chatSettings.timezone) {
+            const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T');
+            return Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.timezone}]`).toInstant().toString();
+        }
+        return parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
+    }
+
+    async getOrCreateChatSettings(ctx, chatId) {
+        let chatSettings = await this.database.getChatSettings(chatId);
+        if (!chatSettings && chatId < 0) {
+            chatSettings = await this.makeChatSettings(chatId, ctx);
+            await this.database.createChatSettings(chatSettings);
+        }
+        return chatSettings;
+    }
+
+    async ensureAccess(ctx, userId, chatId, createdById, cmdName, chatSettings) {
+        if (await this.isSuperAdmin(userId)) return true;
+
+        if (chatSettings == null) chatSettings = {};
+        Object.assign(chatSettings, await this.getOrCreateChatSettings(ctx, chatId));
+        return await this.ensureCommandAccess(ctx, chatSettings, cmdName, userId, createdById);
+    }
+
+    async ensureCommandAccess(ctx, chatSettings, cmdName, userId, createdById, valueIfNoFoundCommand = true) {
+        if (!(await this.hasSuitedLicense(chatSettings, cmdName))) {
+            await this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
+            return false;
+        }
+
+        if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, userId, createdById, valueIfNoFoundCommand)) {
+            await this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
+            return false;
+        }
+        return true;
     }
 
     async replyToUser(ctx, message) {
