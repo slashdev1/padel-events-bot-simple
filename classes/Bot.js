@@ -607,7 +607,7 @@ class Bot {
 
     parseDateByChatSettings(stringDate, chatSettings = {}) {
         if (chatSettings.timezone) {
-            const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T');
+            const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T').replace(/T(\d):/, "T0$1:"); // T9:00 -> T09:00
             return Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.timezone}]`).toInstant().toString();
         }
         return parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
