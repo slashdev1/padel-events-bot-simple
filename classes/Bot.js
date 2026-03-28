@@ -69,31 +69,43 @@ class Bot {
 
             if (newStatus === 'kicked' || newStatus === 'left') {
                 console.log(`Бот вилучений з чату ${chatId}`);
-                if (chatId < 0)
-                    this.database.updateChatSettings({ chatId, botStatus: newStatus });
-                else
-                    this.database.updateUser({ id: chatId, started: false });
+                this.updateChatStatus(chatId, newStatus);
+                //!!!
+                // if (chatId < 0)
+                //     this.database.updateChatSettings({ chatId, botStatus: newStatus });
+                // else
+                //     this.database.updateUser({ id: chatId, started: false });
             } else if (newStatus === 'member') {
                 console.log(`Бот доданий до чату ${chatId}`);
-                if (chatId < 0) {
-                    this.database.updateChatSettings({ chatId, botStatus: newStatus }, async () => await this.makeChatSettings(chatId, ctx));
-                    this.replyOrDoNothing(ctx, 'Привіт! Дякую за додавання мене до групи.');
-                } else
-                    this.database.updateUser({ id: chatId, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings() });
+                this.updateChatStatus(chatId, newStatus, ctx);
+                //!!!
+                // if (chatId < 0) {
+                //     this.database.updateChatSettings({ chatId, botStatus: newStatus }, async () => await this.makeChatSettings(chatId, ctx));
+                //     this.replyOrDoNothing(ctx, 'Привіт! Дякую за додавання мене до групи.');
+                // } else
+                //     this.database.updateUser({ id: chatId, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings() });
             }
         });
     }
 
     async handleStart(ctx) {
-        const user = ctx.from;
-        await this.database.updateUser({ ...user, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings() });
+        const chatId = ctx.chat.id;
+        if (this.isGroup(chatId)) return; // Ця команда має сенс лише у чаті з користувачем, а не у групових
+
+        // const user = ctx.from;
+        //!!!
+        //await this.database.updateUser({ ...user, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings() });
+        this.updateChatStatus(chatId, 'member', ctx);
+
         let message = this.botCommands['start']?.description;
         if (!message) return;
+
         let tpl = eval('`'+message+'`');
-        if (ctx.chat.id < 0)
-            this.bot.telegram.sendMessage(user.id, tpl, { parse_mode: 'Markdown' });
-        else
-            this.replyOrDoNothing(ctx, tpl);
+        // if (this.isGroup(chatId))
+        //     this.bot.telegram.sendMessage(user.id, tpl, { parse_mode: 'Markdown' });
+        // else
+        //     this.replyOrDoNothing(ctx, tpl);
+        this.sendMessageEx(chatId, tpl, { parse_mode: 'Markdown' });
     }
 
     async handleHelp(ctx) {
@@ -127,40 +139,49 @@ class Bot {
 
     async handleSendTo(ctx) {
         if (!await this.isSuperAdmin(ctx.from.id)) return;
+
         let [_, ...args] = splitWithTail(ctx.message.text, 3);
 
         const userOrChatId = parseInt(args[0], 10);
         if (Number.isNaN(userOrChatId)) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передане некоректе id користувача/групи.');
-        const message = textMarkdownNormalize(args[1]);
+        // const message = textMarkdownNormalize(args[1]);
 
-        // TODO: !!!
-        let user, chat;
-        if (userOrChatId < 0)
-            chat = null;
-        else
-            user = await this.database.getUser(userOrChatId);
+        // // TODO: !!!
+        // let user, chat;
+        // if (userOrChatId < 0)
+        //     chat = null;
+        // else
+        //     user = await this.database.getUser(userOrChatId);
 
-        let sent = false;
-        try {
-            await this.sendMessage(userOrChatId, message, { parse_mode: 'Markdown' });
-            sent = true;
-        } catch (error) {
-            if ((error?.code || error?.response?.error_code) === 403) {
-                if (userOrChatId < 0)
-                    await this.database.updateChatSettings({ chatId: userOrChatId, botStatus: 'kicked/left' });
-                else
-                    await this.database.updateUser({ id: userOrChatId, started: false });
-                return;
-            } else if ((error?.code || error?.response?.error_code) === 400 && (error.response?.body?.description || error?.response?.description)?.includes('chat not found')) {
-                if (userOrChatId < 0)
-                    await this.database.updateChatSettings({ chatId: userOrChatId, status: 'not found' });
-                //else
-                //    await this.database.updateUser({ id: userOrChatId, started: false });
-                return;
-            }
-            console.error(error);
-        }
-        if (sent && user && !user?.started) await this.database.updateUser({ id: userOrChatId, started: true, startedTimestamp: new Date() });
+        // let sent = false;
+        // try {
+        //     await this.sendMessage(userOrChatId, message, { parse_mode: 'Markdown' });
+        //     sent = true;
+        // } catch (error) {
+        //     this.handleError(error);
+        //     if ((error?.code || error?.response?.error_code) === 403) {
+        //         //!!!
+        //         // if (userOrChatId < 0)
+        //         //     await this.database.updateChatSettings({ chatId: userOrChatId, botStatus: 'kicked/left' });
+        //         // else
+        //         //     await this.database.updateUser({ id: userOrChatId, started: false });
+        //         // return;
+        //     } else if ((error?.code || error?.response?.error_code) === 400 && (error.response?.body?.description || error?.response?.description)?.includes('chat not found')) {
+        //         //!!!
+        //         // if (userOrChatId < 0)
+        //         //     await this.database.updateChatSettings({ chatId: userOrChatId, status: 'not found' });
+        //         // //else
+        //         // //    await this.database.updateUser({ id: userOrChatId, started: false });
+        //         // return;
+        //     }
+        //     // console.error(error);
+        // }
+        // //!!!
+        // if (sent && user && !user?.started)
+        //     //await this.database.updateUser({ id: userOrChatId, started: true, startedTimestamp: new Date() });
+        //     this.updateChatStatus(userOrChatId, 'member', ctx);
+        const message = args[1];
+        this.sendMessageEx(userOrChatId, message);
     }
 
     async handleGetAdm(ctx) {
@@ -181,7 +202,7 @@ class Bot {
 
     async handleAddGame(ctx) {
         const chatId = ctx.chat.id;
-        if (!(chatId < 0)) {
+        if (!this.isGroup(chatId)) {
             return this.replyToUserDirectOrDoNothing(ctx, this.emoji.err + 'Ця команда доступна тільки для груп!');
         }
 
@@ -405,7 +426,7 @@ class Bot {
         const userId = ctx.from.id;
         const filter = { isActive: true };
         let where = '';
-        if (chatId < 0) {
+        if (this.isGroup(chatId)) {
             filter.chatId = chatId;
             where = ' у ' + ctx.chat.title;
         }
@@ -417,7 +438,7 @@ class Bot {
             games.forEach(game => {
                 let gameDate = date2int(game.date);
                 if (gameDate && gameDate + 86400000 < Date.now()) return;
-                let status = (chatId < 0) ? ' Ще не має статусу' : '';
+                let status = this.isGroup(chatId) ? ' Ще не має статусу' : '';
                 let ind = game.players.filter(p => p.status === 'joined').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).findIndex(p => p.id === userId);
                 let limit = game.maxPlayers || Infinity;
                 if (ind >= 0 && ind < limit) status = '✅ Йду';
@@ -594,7 +615,7 @@ class Bot {
 
     async getOrCreateChatSettings(ctx, chatId) {
         let chatSettings = await this.database.getChatSettings(chatId);
-        if (!chatSettings && chatId < 0) {
+        if (!chatSettings && this.isGroup(chatId)) {
             chatSettings = await this.makeChatSettings(chatId, ctx);
             await this.database.createChatSettings(chatSettings);
         }
@@ -630,9 +651,11 @@ class Bot {
             try {
                 await this.bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
             } catch (error) {
+                this.handleError(error);
+                //!!!
                 if (error?.code === 403) {
                     //replyWarning(ctx);
-                    await this.database.updateUser({ ...ctx.from, started: false });
+                    //await this.database.updateUser({ ...ctx.from, started: false });
                 } else
                     this.replyOrDoNothing(ctx, message);
             }
@@ -648,13 +671,17 @@ class Bot {
             await this.bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
             sent = true;
         } catch (error) {
-            if (error?.code === 403) {
-                await this.database.updateUser({ ...ctx.from, started: false });
-                return;
-            }
-            console.error(error);
+            this.handleError(error);
+            // if (error?.code === 403) {
+            //     await this.database.updateUser({ ...ctx.from, started: false });
+            //     return;
+            // }
+            // console.error(error);
         }
-        if (sent && !user?.started) await this.database.updateUser({ ...ctx.from, started: true, startedTimestamp: new Date() });
+        //!!!
+        if (sent && !user?.started)
+            //await this.database.updateUser({ ...ctx.from, started: true, startedTimestamp: new Date() });
+            this.updateChatStatus(userId, 'member', ctx);
     }
 
     async replyOrDoNothing(ctx, message, extra) {
@@ -662,6 +689,22 @@ class Bot {
             return await ctx.reply(message, extra);
         } catch (error) {
             console.error(error);
+        }
+    }
+
+    async sendMessageEx(chatId, message, options = {}) {
+        let sent = false;
+        try {
+            await this.sendMessage(chatId, textMarkdownNormalize(message), { parse_mode: 'Markdown', ...options });
+            sent = true;
+        } catch (error) {
+            this.handleError(error);
+        }
+        if (sent && !this.isGroup(chatId)) {
+            const user = await this.database.getUser(chatId);
+            if (user && !user?.started)
+                //await this.database.updateUser({ id: userOrChatId, started: true, startedTimestamp: new Date() });
+                this.updateChatStatus(chatId, 'member');
         }
     }
 
@@ -778,7 +821,7 @@ class Bot {
             notificationTerms: config.notificationTerms
         }
         if (!chatSettings.allMembersAreAdministrators) {
-            const admins = chatId < 0 && await this.bot.telegram.getChatAdministrators(chatId);
+            const admins = this.isGroup(chatId) && await this.bot.telegram.getChatAdministrators(chatId);
             if (admins && admins.length) {
                 chatSettings.admins = admins.map(adm => {
                     return {
@@ -817,6 +860,49 @@ class Bot {
 
     async isSuperAdmin(userId) {
         return (await this.database.getGlobalSettings())?.superAdminId == userId;
+    }
+
+    isGroup(chatId) {
+        return chatId < 0;
+    }
+
+    handleError(error) {
+        // console.log('============= ERROR =============');
+        // console.log('error.code=' + error.code);
+        // console.log('error.on.payload.chat_id=' + error.on?.payload?.chat_id);
+        // console.log('json=' + JSON.stringify(error, null, 2));
+        console.error(error);
+
+        const chatId = error.on?.payload?.chat_id;
+        if (!chatId) return;
+
+        const errorCode = error?.code;
+        if (errorCode == 403) {
+            // error?.response?.description: 'Forbidden: bot was kicked from the group chat'
+            // error?.response?.description: 'Forbidden: bot was blocked by the user'
+            const status = 'kicked/blocked';
+            this.updateChatStatus(chatId, status);
+            return;
+        }
+
+        if (errorCode == 400 && (error?.response?.description)?.includes('chat not found')) {
+            // error?.response?.description: 'Bad Request: chat not found'
+            const status = 'not found';
+            this.updateChatStatus(chatId, status);
+            return;
+        }
+    }
+
+    updateChatStatus(chatId, status, ctx) {
+        const needToSetDefaultSettings = status === 'member';
+        if (this.isGroup(chatId)) {
+            this.database.updateChatSettings({ chatId, botStatus: status }, needToSetDefaultSettings ? async () => await this.makeChatSettings(chatId, ctx) : null);
+            if (needToSetDefaultSettings) this.replyOrDoNothing(ctx, 'Привіт! Дякую за додавання мене до групи.');
+        }
+        else {
+            const started = status === 'member';
+            this.database.updateUser({ id: chatId, started, ...(needToSetDefaultSettings ? { settings: this.getDefaultSettings() } : {}), ...(started ? ctx.from : {}) });
+        }
     }
 }
 

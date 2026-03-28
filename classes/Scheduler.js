@@ -124,15 +124,17 @@ class Scheduler {
         const replyText = `🔔 Нагадування\n\nГра "${game.name}" відбудеться ${timeText}!`;
         console.log(`Відправка користувачу ${user.userId} повідомлення ${replyText}`);
 
-        try {
-            await this.bot.sendMessage(user.userId, replyText);
-        } catch (error) {
-            if (error?.code === 403) {
-                await this.database.updateUser({ id: user.userId, started: false });
-                return;
-            }
-            console.error(`[Telegram Error] Chat ${user.userId}:`, error.message);
-        }
+        // try {
+        //     await this.bot.sendMessage(user.userId, replyText);
+        // } catch (error) {
+        //     //!!!
+        //     if (error?.code === 403) {
+        //         await this.database.updateUser({ id: user.userId, started: false });
+        //         return;
+        //     }
+        //     console.error(`[Telegram Error] Chat ${user.userId}:`, error.message);
+        // }
+        await this.bot.sendMessageEx(user.userId, replyText);
     }
 
     /**

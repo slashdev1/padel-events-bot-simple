@@ -169,12 +169,14 @@ class Database {
     async updateUser(userData, force) {
         const fields = {};
         if ('id' in userData) fields.userId = userData.id;
-        if ('started' in userData) fields.started = userData.started;
-        if ('startedTimestamp' in userData) fields.startedTimestamp = userData.startedTimestamp;
+        if ('started' in userData) {
+            fields.started = userData.started;
+            if (fields.started) fields.startedTimestamp = new Date();
+        }
         if ('first_name' in userData) fields.firstName = userData.first_name;
         if ('last_name' in userData) fields.lastName = userData.last_name;
         if ('username' in userData) fields.username = userData.username;
-        fields.updatedDate = new Date();
+
         const fieldsForInsert = {};
         if ('settings' in userData) {
             const transformed = Object.entries(userData.settings).reduce((acc, [key, value]) => {
@@ -183,17 +185,18 @@ class Database {
             }, {});
             Object.assign(force === true ? fields : fieldsForInsert, transformed);
         }
-        if ('createdDate' in userData) fieldsForInsert.createdDate = userData.createdDate;
+
+        fields.updatedDate = new Date();
+        fieldsForInsert.createdDate = new Date();
 
         const result = await this.usersCollection().updateOne(
             { userId: userData.id },
-            { $set: fields },
-            { $setOnInsert: fieldsForInsert},
+            { $set: fields, $setOnInsert: fieldsForInsert},
             { upsert: true }
         );
-        if (result?.acknowledged) {
+        if (result?.modifiedCount) {
             const cacheKey = `User:${userData.id}`;
-            this.cache.set(cacheKey, fields, this.ttlUserDataMs);
+            this.cache.set(cacheKey, { ...fieldsForInsert, ...fields }, this.ttlUserDataMs);
         }
         return result;
     }
