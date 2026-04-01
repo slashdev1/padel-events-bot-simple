@@ -36,5 +36,8 @@
     "change_settings": {
         "description": "Змінює налаштування користувача.",
         "example": "Вкажіть назву налаштування післяцього знак рівняння та значення. Приклад: /change_settings notificationTerms=\"-1440,-60\" "
+    },
+    "ver": {
+        "description": "Повертає версію бота."
     }
 }

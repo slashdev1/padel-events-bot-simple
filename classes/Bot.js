@@ -49,7 +49,7 @@ class Bot {
         this.bot.command('active_games', this.handleActiveGames.bind(this));
         this.bot.command('settings', this.handleSettings.bind(this));
         this.bot.command('change_settings', this.handleChangeSettings.bind(this));
-        this.bot.command('__ver', this.handleGetVersion.bind(this));
+        this.bot.command('ver', this.handleGetVersion.bind(this));
         this.bot.command('__time', this.handleTime.bind(this));
         this.bot.command('__send_to', this.handleSendTo.bind(this));
         this.bot.command('__adm', this.handleGetAdm.bind(this));
@@ -70,41 +70,23 @@ class Bot {
             if (newStatus === 'kicked' || newStatus === 'left') {
                 console.log(`Бот вилучений з чату ${chatId}`);
                 this.updateChatStatus(chatId, newStatus);
-                //!!!
-                // if (chatId < 0)
-                //     this.database.updateChatSettings({ chatId, botStatus: newStatus });
-                // else
-                //     this.database.updateUser({ id: chatId, started: false });
             } else if (newStatus === 'member') {
                 console.log(`Бот доданий до чату ${chatId}`);
                 this.updateChatStatus(chatId, newStatus, ctx);
-                //!!!
-                // if (chatId < 0) {
-                //     this.database.updateChatSettings({ chatId, botStatus: newStatus }, async () => await this.makeChatSettings(chatId, ctx));
-                //     this.replyOrDoNothing(ctx, 'Привіт! Дякую за додавання мене до групи.');
-                // } else
-                //     this.database.updateUser({ id: chatId, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings() });
             }
         });
     }
 
     async handleStart(ctx) {
-        const chatId = ctx.chat.id;
+        const chatId = this.getChatId(ctx);
         if (this.isGroup(chatId)) return; // Ця команда має сенс лише у чаті з користувачем, а не у групових
 
-        // const user = ctx.from;
-        //!!!
-        //await this.database.updateUser({ ...user, started: true, startedTimestamp: new Date(), createdDate: new Date(), settings: this.getDefaultSettings() });
         this.updateChatStatus(chatId, 'member', ctx);
 
         let message = this.botCommands['start']?.description;
         if (!message) return;
 
         let tpl = eval('`'+message+'`');
-        // if (this.isGroup(chatId))
-        //     this.bot.telegram.sendMessage(user.id, tpl, { parse_mode: 'Markdown' });
-        // else
-        //     this.replyOrDoNothing(ctx, tpl);
         this.sendMessageEx(chatId, tpl, { parse_mode: 'Markdown' });
     }
 
@@ -125,7 +107,7 @@ class Bot {
     }
 
     async handleTime(ctx) {
-        const chatId = ctx.chat.id;
+        const chatId = this.getChatId(ctx);
         const now = new Date();
         let replyText = `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}\nЧасовий здвиг на сервері:\n${now.getTimezoneOffset()} хв.`;
         const chatSettings = await this.database.getChatSettings(chatId);
@@ -144,42 +126,7 @@ class Bot {
 
         const userOrChatId = parseInt(args[0], 10);
         if (Number.isNaN(userOrChatId)) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передане некоректе id користувача/групи.');
-        // const message = textMarkdownNormalize(args[1]);
 
-        // // TODO: !!!
-        // let user, chat;
-        // if (userOrChatId < 0)
-        //     chat = null;
-        // else
-        //     user = await this.database.getUser(userOrChatId);
-
-        // let sent = false;
-        // try {
-        //     await this.sendMessage(userOrChatId, message, { parse_mode: 'Markdown' });
-        //     sent = true;
-        // } catch (error) {
-        //     this.handleError(error);
-        //     if ((error?.code || error?.response?.error_code) === 403) {
-        //         //!!!
-        //         // if (userOrChatId < 0)
-        //         //     await this.database.updateChatSettings({ chatId: userOrChatId, botStatus: 'kicked/left' });
-        //         // else
-        //         //     await this.database.updateUser({ id: userOrChatId, started: false });
-        //         // return;
-        //     } else if ((error?.code || error?.response?.error_code) === 400 && (error.response?.body?.description || error?.response?.description)?.includes('chat not found')) {
-        //         //!!!
-        //         // if (userOrChatId < 0)
-        //         //     await this.database.updateChatSettings({ chatId: userOrChatId, status: 'not found' });
-        //         // //else
-        //         // //    await this.database.updateUser({ id: userOrChatId, started: false });
-        //         // return;
-        //     }
-        //     // console.error(error);
-        // }
-        // //!!!
-        // if (sent && user && !user?.started)
-        //     //await this.database.updateUser({ id: userOrChatId, started: true, startedTimestamp: new Date() });
-        //     this.updateChatStatus(userOrChatId, 'member', ctx);
         const message = args[1];
         this.sendMessageEx(userOrChatId, message);
     }
@@ -201,7 +148,7 @@ class Bot {
     }
 
     async handleAddGame(ctx) {
-        const chatId = ctx.chat.id;
+        const chatId = this.getChatId(ctx);
         if (!this.isGroup(chatId)) {
             return this.replyToUserDirectOrDoNothing(ctx, this.emoji.err + 'Ця команда доступна тільки для груп!');
         }
@@ -212,20 +159,11 @@ class Bot {
 
         const chatSettings = await this.database.getChatSettings(chatId) || {};
         if (!await this.ensureAccess(ctx, ctx.from.id, chatId, null, cmdName, chatSettings)) return;
-        // if (!await this.isSuperAdmin(ctx.from.id)) {
-        //     if (!chatSettings) {
-        //         chatSettings = await this.makeChatSettings(chatId, ctx);
-        //         await this.database.createChatSettings(chatSettings);
-        //     }
-
-        //     if (!(await this.ensureCommandAccess(ctx, chatSettings, cmdName, ctx.from.id)))
-        //         return;
-        // }
 
         const onlyGameName = (args.length != 3 || !isNumeric(args[2]));
         if (!onlyGameName)
-            if (args.length < 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
-            else if (args.length > 3) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана некоректа кількість параметрів. ' + (occurrences(msgText, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '') + this.botCommands[cmdName].example);
+            if (args.length < 3) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
+            else if (args.length > 3) return this.replyWarning(ctx, cmdName, 'Передана некоректа кількість параметрів. ' + (occurrences(msgText, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : ''));
 
         let name;
         let maxPlayers;
@@ -303,7 +241,7 @@ class Bot {
         let [cmdName, ...args] = str2params(ctx.message.text);
         cmdName = cmdName.slice(1);
 
-        if (args.length < 1) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Не переданий ідентифікатор гри. ' + this.botCommands[cmdName].example);
+        if (args.length < 1) return this.replyWarning(ctx, cmdName, 'Не переданий ідентифікатор гри.');
 
         const gameId = args[0];
         const game = await this.database.getGame(gameId);
@@ -332,7 +270,7 @@ class Bot {
         let [cmdName, ...args] = str2params(ctx.message.text);
         cmdName = cmdName.slice(1);
 
-        if (args.length < 2) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
+        if (args.length < 2) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
 
         const gameId = args.shift();
         const game = await this.database.getGame(gameId);
@@ -341,11 +279,6 @@ class Bot {
         const chatId = game.chatId;
         const chatSettings = await this.database.getChatSettings(chatId) || {};
         if (!await this.ensureAccess(ctx, ctx.from.id, chatId, game.createdById, cmdName, chatSettings)) return;
-        // if (!await this.isSuperAdmin(ctx.from.id)) {
-        //     chatSettings = await this.getOrCreateChatSettings(ctx, chatId);
-        //     if (!(await this.ensureCommandAccess(ctx, chatSettings, cmdName, ctx.from.id, game.createdById)))
-        //         return;
-        // }
 
         const supportedParams = { name: null, players: null, date: null, active: null };
         for (let i = 0; i < args.length; i++) {
@@ -398,7 +331,7 @@ class Bot {
         let [cmdName, ...args] = str2params(ctx.message.text);
         cmdName = cmdName.slice(1);
 
-        if (args.length < 2) return this.replyOrDoNothing(ctx, this.emoji.warn + 'Передана недостатня кількість параметрів. ' + this.botCommands[cmdName].example);
+        if (args.length < 2) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
 
         const gameId = args.shift();
         const game = await this.database.getGame(gameId);
@@ -422,7 +355,7 @@ class Bot {
     }
 
     async handleActiveGames(ctx) {
-        const chatId = ctx.chat.id;
+        const chatId = this.getChatId(ctx);
         const userId = ctx.from.id;
         const filter = { isActive: true };
         let where = '';
@@ -453,14 +386,16 @@ class Bot {
             });
             if (lines.length) {
                 lines.sort((a, b) => (a.gameDate || 0) - (b.gameDate || 0));
-                response = `📋 **Активні ігри${where}:**\n\n` + lines.map(elem => elem.text).join(`\n`);
+                response = `📋 **Активні ігри${where}:**\n\n` + lines.map(elem => elem.text).join('\n' + '—'.repeat(18) + '\n');
             }
         }
         this.replyToUser(ctx, response);
     }
 
     async handleSettings(ctx) {
-        if (ctx.chat.id < 0) return; // Ця команда тільки для чату користувача
+        const chatId = this.getChatId(ctx);
+        if (this.isGroup(chatId)) return; // Ця команда тільки для чату користувача
+
         const userId = ctx.from.id;
         const user = await this.database.getUserFromDB(userId);
         try {
@@ -471,7 +406,9 @@ class Bot {
     }
 
     async handleChangeSettings(ctx) {
-        if (ctx.chat.id < 0) return; // Ця команда тільки для чату користувача
+        const chatId = this.getChatId(ctx);
+        if (this.isGroup(chatId)) return; // Ця команда тільки для чату користувача
+
         const userId = ctx.from.id;
         let [_, ...args] = parseArgs(ctx.message.text);
         if (args.length != 1) return await this.sendMessage(userId, this.emoji.warn + 'Передана некоректа кількість параметрів.');
@@ -548,13 +485,9 @@ class Bot {
 
     buildTextMessage(game) {
         const players = game.players || [];
-        // const m = (user) => (user.name[0] != '@' && user.name.indexOf(' ') == -1 ? '@' : '') + user.name +
-        //     (user.extraPlayer ? '(+' + user.extraPlayer + ')': '');
         const m = (user) => {
-            //const flag = user.name[0] == '@';
             const extra = (user.extraPlayer ? ' (+)' : '');
             return `[${user.fullName || user.name}${extra}](tg://user?id=${user.id})`;
-            //return user.fullName ? ((flag ? '[' : '') + user.fullName + extra + (flag ? ']' : '') + (flag ? `(tg://user?id=${user.id})` : '')) : ((!flag && user.name.indexOf(' ') == -1 ? '@' : '') + user.name + extra);
         };
         const limit = game.maxPlayers || Infinity;
         const dateText = game.date ? ` (${date2text(game.date)})` : '';
@@ -672,15 +605,8 @@ class Bot {
             sent = true;
         } catch (error) {
             this.handleError(error);
-            // if (error?.code === 403) {
-            //     await this.database.updateUser({ ...ctx.from, started: false });
-            //     return;
-            // }
-            // console.error(error);
         }
-        //!!!
         if (sent && !user?.started)
-            //await this.database.updateUser({ ...ctx.from, started: true, startedTimestamp: new Date() });
             this.updateChatStatus(userId, 'member', ctx);
     }
 
@@ -703,7 +629,6 @@ class Bot {
         if (sent && !this.isGroup(chatId)) {
             const user = await this.database.getUser(chatId);
             if (user && !user?.started)
-                //await this.database.updateUser({ id: userOrChatId, started: true, startedTimestamp: new Date() });
                 this.updateChatStatus(chatId, 'member');
         }
     }
@@ -862,15 +787,15 @@ class Bot {
         return (await this.database.getGlobalSettings())?.superAdminId == userId;
     }
 
+    getChatId(ctx) {
+        return ctx.chat.id;
+    }
+
     isGroup(chatId) {
         return chatId < 0;
     }
 
     handleError(error) {
-        // console.log('============= ERROR =============');
-        // console.log('error.code=' + error.code);
-        // console.log('error.on.payload.chat_id=' + error.on?.payload?.chat_id);
-        // console.log('json=' + JSON.stringify(error, null, 2));
         console.error(error);
 
         const chatId = error.on?.payload?.chat_id;
@@ -897,14 +822,20 @@ class Bot {
         const needToSetDefaultSettings = status === 'member';
         if (this.isGroup(chatId)) {
             this.database.updateChatSettings({ chatId, botStatus: status }, needToSetDefaultSettings ? async () => await this.makeChatSettings(chatId, ctx) : null);
-            if (needToSetDefaultSettings) this.replyOrDoNothing(ctx, 'Привіт! Дякую за додавання мене до групи.');
+            if (needToSetDefaultSettings) this.replyOrDoNothing(ctx, 'Привіт!\nДякую за додавання мене до групи.\n\nЩоб дізнатися що я вмію відправьте команду /help.');
         }
         else {
             const started = status === 'member';
             this.database.updateUser({ id: chatId, started, ...(needToSetDefaultSettings ? { settings: this.getDefaultSettings() } : {}), ...(started ? ctx.from : {}) });
         }
     }
+
+    replyWarning(ctx, cmdName, warnText) {
+        return this.replyOrDoNothing(
+            ctx,
+            this.emoji.warn + warnText + ' ' + (this.botCommands[cmdName].example || '')
+        );
+    }
 }
 
 module.exports = Bot;
-
