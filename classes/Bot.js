@@ -37,6 +37,7 @@ class Bot {
         this.setupCommands();
         this.setupActions();
         this.setupMyChatMember();
+        this.setupChatMembers();
     }
 
     setupCommands() {
@@ -74,6 +75,61 @@ class Bot {
                 console.log(`Бот доданий до чату ${chatId}`);
                 this.updateChatStatus(chatId, newStatus, ctx);
             }
+        });
+    }
+
+    setupChatMembers() {
+        this.bot.on('new_chat_members', (ctx) => {
+            // В масиві new_chat_members може бути кілька користувачів (якщо їх додали пачкою)
+            const newMembers = ctx.message.new_chat_members;
+            // Отримуємо ID чату
+            const chatId = ctx.chat.id;
+            // Отримуємо назву чату (групи)
+            const chatTitle = ctx.chat.title;
+            console.log(`Новий учасник у групі: ${chatTitle} (ID: ${chatId})`);
+            newMembers.forEach((user) => {
+                const name = user.username ? `@${user.username}` : user.first_name;
+                //ctx.reply(`Вітаємо в групі, ${name}! 👋`);
+                console.log(`Новий користувач: ${name} (ID: ${user.id})`);
+            });
+        });
+
+        this.bot.on('chat_member', (ctx) => {
+            const oldStatus = ctx.chatMember.old_chat_member.status;
+            const newStatus = ctx.chatMember.new_chat_member.status;
+
+            if (oldStatus === 'left' && newStatus === 'member') {
+                ctx.reply(`Користувач ${ctx.chatMember.from.first_name} приєднався!`);
+            } else
+                ctx.reply(`Користувач ${ctx.chatMember.from.first_name} змінив статус ${oldStatus} з на ${newStatus}!`);
+        });
+
+        // 1. Обробка входу нових учасників
+        // this.bot.on('new_chat_members', (ctx) => {
+        //     // new_chat_members — це масив, бо за раз можуть додати кількох людей
+        //     const newMembers = ctx.message.new_chat_members;
+
+        //     newMembers.forEach((user) => {
+        //         const name = user.username ? `@${user.username}` : user.first_name;
+        //         console.log(`Новий користувач: ${name} (ID: ${user.id})`);
+
+        //         ctx.reply(`Ласкаво просимо, ${name}! 👋`);
+        //     });
+        // });
+
+        // 2. Обробка виходу або видалення учасника
+        this.bot.on('left_chat_member', (ctx) => {
+            // Отримуємо ID чату
+            const chatId = ctx.chat.id;
+            // Отримуємо назву чату (групи)
+            const chatTitle = ctx.chat.title;
+            console.log(`Учасник пішов з групи: ${chatTitle} (ID: ${chatId})`);
+            const user = ctx.message.left_chat_member;
+            const name = user.username ? `@${user.username}` : user.first_name;
+
+            console.log(`Користувач пішов: ${name} (ID: ${user.id})`);
+
+            //ctx.reply(`${name} покинув чат. До зустрічі! 😢`);
         });
     }
 
