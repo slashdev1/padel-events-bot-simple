@@ -219,7 +219,7 @@ const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
         2: ['вівторок', 'вторник', '(^|\\s|[,.])(вт)($|\\s|[,.])'],
         3: ['середа', 'среда', 'середу', 'среду', '(^|\\s|[,.])(ср)($|\\s|[,.])'],
         4: ['четвер', 'четверг', '(^|\\s|[,.])(чт)($|\\s|[,.])'],
-        5: ['п’ятниця', 'пятница', 'п’ятницю', 'пятницу', '(^|\\s|[,.])(пт)($|\\s|[,.])'],
+        5: ['п’ятниця', 'п’ятницю', 'пʼятниця', 'пʼятницю', 'пятница', 'пятницу', '(^|\\s|[,.])(пт)($|\\s|[,.])'],
         6: ['субота', 'суббота', 'суботу', 'субботу', '(^|\\s|[,.])(сб)($|\\s|[,.])']
     };
 
@@ -262,7 +262,7 @@ const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
 
 const extractPlayers = (input) => {
     // Шукаємо число, за яким йдуть варіації слова "гравці"
-    const regex = /(\d+)\s*(грав|игрок|люд|челов)/i;
+    const regex = /(\d+)\s*(грав|игрок|люд|челов|учасни)/i;
     const match = input.match(regex);
 
     if (match) {
@@ -274,6 +274,8 @@ const extractPlayers = (input) => {
     return null;
 }
 
+// Допоміжна функція для безпечного підрахунку груп з цифр у рядку
+const getDigitGroupCount = (str) => (str?.match(/\d+/g) || []).length;
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
     date.setDate(date.getDate() + days);
@@ -330,5 +332,6 @@ module.exports = {
     strBefore,
     strAfter,
     splitWithTail,
-    extractPlayers
+    extractPlayers,
+    getDigitGroupCount
 };

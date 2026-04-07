@@ -18,7 +18,8 @@ const {
     strAfter,
     splitWithTail,
     extractPlayers,
-    parseDateWithTimezone
+    parseDateWithTimezone,
+    getDigitGroupCount
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
 
@@ -43,13 +44,13 @@ class Bot {
     setupCommands() {
         this.bot.command('start', this.handleStart.bind(this));
         this.bot.command('help', this.handleHelp.bind(this));
-        this.bot.command('add_game', this.handleAddGame.bind(this));
-        this.bot.command('del_game', this.handleDelGame.bind(this));
-        this.bot.command('change_game', this.handleChangeGame.bind(this));
+        this.bot.command(['add_game', 'game', 'add-game', 'addgame'], this.handleAddGame.bind(this));
+        this.bot.command(['del_game', 'del-game', 'delgame'], this.handleDelGame.bind(this));
+        this.bot.command(['change_game', 'change-game', 'changegame'], this.handleChangeGame.bind(this));
         this.bot.command('kick', this.handleKickFromGame.bind(this));
-        this.bot.command('active_games', this.handleActiveGames.bind(this));
+        this.bot.command(['active_games', 'games', 'active-games', 'activegames'], this.handleActiveGames.bind(this));
         this.bot.command('settings', this.handleSettings.bind(this));
-        this.bot.command('change_settings', this.handleChangeSettings.bind(this));
+        this.bot.command(['change_settings', 'change-settings', 'changesettings'], this.handleChangeSettings.bind(this));
         this.bot.command('ver', this.handleGetVersion.bind(this));
         this.bot.command('__time', this.handleTime.bind(this));
         this.bot.command('__send_to', this.handleSendTo.bind(this));
@@ -176,7 +177,7 @@ class Bot {
     }
 
     async handleSendTo(ctx) {
-        if (!await this.isSuperAdmin(ctx.from.id)) return;
+        if (!await this.isSuperAdmin(ctx)) return;
 
         let [_, ...args] = splitWithTail(ctx.message.text, 3);
 
@@ -192,7 +193,7 @@ class Bot {
     }
 
     async handleDeleteMessage(ctx) {
-        if (!await this.isSuperAdmin(ctx.from.id)) return;
+        if (!await this.isSuperAdmin(ctx)) return;
         let [_, chatId, messageId] = str2params(ctx.message.text);
 
         try {
@@ -214,59 +215,63 @@ class Bot {
         cmdName = cmdName.slice(1);
 
         const chatSettings = await this.database.getChatSettings(chatId) || {};
-        if (!await this.ensureAccess(ctx, ctx.from.id, chatId, null, cmdName, chatSettings)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, cmdName, chatSettings)) return;
 
-        const onlyGameName = (args.length != 3 || !isNumeric(args[2]));
-        if (!onlyGameName)
-            if (args.length < 3) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
-            else if (args.length > 3) return this.replyWarning(ctx, cmdName, 'Передана некоректа кількість параметрів. ' + (occurrences(msgText, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : ''));
+        // TODO: /game Гра у форматі 8/12, вівторок -l1=1-8 -p1=8 -l2=9-12 -p2=4
+        let { error, name, maxPlayers, date, isDateWithoutTime, subgames } = this.parseGameData(args, chatSettings);
+        if (error) return error;
+        // const onlyGameName = (args.length != 3 || !isNumeric(args[2]));
+        // if (!onlyGameName)
+        //     if (args.length < 3) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
+        //     else if (args.length > 3) return this.replyWarning(ctx, cmdName, 'Передана некоректа кількість параметрів. ' + (occurrences(msgText, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : ''));
 
-        let name;
-        let maxPlayers;
-        let date;
-        let isDateWithoutTime;
-        if (onlyGameName) {
-            const index = msgText.indexOf(' ');
-            if (index == -1) return this.replyOrDoNothing(ctx, 'Не вказана назва гри.');
+        // let name;
+        // let maxPlayers;
+        // let date;
+        // let isDateWithoutTime;
+        // if (onlyGameName) {
+        //     const index = msgText.indexOf(' ');
+        //     if (index == -1) return this.replyOrDoNothing(ctx, 'Не вказана назва гри.');
 
-            name = msgText.substring(index + 1);
-            isDateWithoutTime = true;
-            let stringDate = extractDate(name);
-            if (!stringDate) {
-                // намагання отримати дату через слова, що мають сенс дати
-                stringDate = parseDateWithTimezone(name);
-            }
-            if (stringDate && stringDate.match(/\d+/g).length === 3) {
-                const time = extractStartTime(name);
-                if (time) stringDate += ' ' + time;
-            }
-            if (stringDate) {
-                const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
-                if (!parsedDate) return this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
-                date = new Date(parsedDate);
+        //     name = msgText.substring(index + 1);
+        //     isDateWithoutTime = true;
+        //     let stringDate = extractDate(name);
+        //     if (!stringDate) {
+        //         // намагання отримати дату через слова, що мають сенс дати
+        //         stringDate = parseDateWithTimezone(name);
+        //     }
+        //     if (stringDate && stringDate.match(/\d+/g).length === 3) {
+        //         const time = extractStartTime(name);
+        //         if (time) stringDate += ' ' + time;
+        //     }
+        //     if (stringDate) {
+        //         const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
+        //         if (!parsedDate) return this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
+        //         date = new Date(parsedDate);
 
-                isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
-            }
-            maxPlayers = extractPlayers(msgText);
-        } else {
-            name = args[0];
-            let stringDate = args[1];
-            if (stringDate.match(/\d+/g).length === 3) {
-                const time = extractStartTime(name);
-                if (time) stringDate += ' ' + time;
-            }
-            const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
-            if (!parsedDate) return this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
-            date = new Date(parsedDate);
+        //         isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
+        //     }
+        //     maxPlayers = extractPlayers(msgText);
+        // } else {
+        //     name = args[0];
+        //     let stringDate = args[1];
+        //     if (stringDate.match(/\d+/g).length === 3) {
+        //         const time = extractStartTime(name);
+        //         if (time) stringDate += ' ' + time;
+        //     }
+        //     const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
+        //     if (!parsedDate) return this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
+        //     date = new Date(parsedDate);
 
-            maxPlayers = parseInt(args[2]);
-            if (!maxPlayers || maxPlayers <= 0) return this.replyOrDoNothing(ctx, 'Кількість ігроків повинно бути числом більше 0.');
+        //     maxPlayers = parseInt(args[2]);
+        //     if (!maxPlayers || maxPlayers <= 0) return this.replyOrDoNothing(ctx, 'Кількість ігроків повинно бути числом більше 0.');
 
-            isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
-        }
+        //     isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
+        // }
 
-        const creatorId = ctx.from.id;
+        const creatorId = this.getUserId(ctx);
         const creatorName = extractUserTitle(ctx.from, false);
+        const chatName = ctx.chat.title;
 
         const game = {
             createdDate: new Date(),
@@ -274,11 +279,13 @@ class Bot {
             createdByName: creatorName,
             isActive: true,
             chatId,
+            chatName,
             name,
             date,
             isDateWithoutTime,
             maxPlayers,
-            players: []
+            players: [],
+            subgames
         };
         console.log(`Now ${new Date()}`);
         console.log(`Converted Date ${game.date}`);
@@ -304,7 +311,7 @@ class Bot {
         if (!game) return;
 
         const chatId = game.chatId;
-        if (!await this.ensureAccess(ctx, ctx.from.id, chatId, game.createdById, cmdName)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName)) return;
 
         if (!game.isActive) await this.database.deactivateGame(gameId);
         try {
@@ -334,7 +341,7 @@ class Bot {
 
         const chatId = game.chatId;
         const chatSettings = await this.database.getChatSettings(chatId) || {};
-        if (!await this.ensureAccess(ctx, ctx.from.id, chatId, game.createdById, cmdName, chatSettings)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
 
         const supportedParams = { name: null, players: null, date: null, active: null };
         for (let i = 0; i < args.length; i++) {
@@ -394,7 +401,7 @@ class Bot {
         if (!game) return;
 
         const chatId = game.chatId;
-        if (!await this.ensureAccess(ctx, ctx.from.id, chatId, game.createdById, cmdName)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName)) return;
 
         let player = args.shift();
         const filtered = game.players.filter(p => String(p.id) === player || p.name === player);
@@ -412,7 +419,7 @@ class Bot {
 
     async handleActiveGames(ctx) {
         const chatId = this.getChatId(ctx);
-        const userId = ctx.from.id;
+        const userId = this.getUserId(ctx);
         const filter = { isActive: true };
         let where = '';
         if (this.isGroup(chatId)) {
@@ -452,7 +459,7 @@ class Bot {
         const chatId = this.getChatId(ctx);
         if (this.isGroup(chatId)) return; // Ця команда тільки для чату користувача
 
-        const userId = ctx.from.id;
+        const userId = this.getUserId(ctx);
         const user = await this.database.getUserFromDB(userId);
         try {
             await this.bot.telegram.sendMessage(userId, JSON.stringify(user.settings || {}, null, 2));
@@ -465,7 +472,7 @@ class Bot {
         const chatId = this.getChatId(ctx);
         if (this.isGroup(chatId)) return; // Ця команда тільки для чату користувача
 
-        const userId = ctx.from.id;
+        const userId = this.getUserId(ctx);
         let [_, ...args] = parseArgs(ctx.message.text);
         if (args.length != 1) return await this.sendMessage(userId, this.emoji.warn + 'Передана некоректа кількість параметрів.');
         const key = strBefore(args[0], '=');
@@ -492,8 +499,9 @@ class Bot {
     }
 
     async updateGameStatus(ctx, action) {
-        const [gameId, extraAction] = ctx.match[1].split('_');
-        const userId = ctx.from.id;
+        const [gameLeagueId, extraAction] = ctx.match[1].split('_');
+        const [gameId, subgameIndex] = gameLeagueId.split('/');
+        const userId = this.getUserId(ctx);
         const username = extractUserTitle(ctx.from);
         const fullName = extractUserTitle(ctx.from, false);
         const timestamp = new Date();
@@ -502,20 +510,20 @@ class Bot {
         if (!game || !game.isActive) return;
 
         const newStatus = getStatusByAction(action);
-        let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer);
+        let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
         if (playerInd != -1 && game.players[playerInd].status === 'kicked') {
             return this.replyToUser(ctx, "Ви не можете змінити статус, бо вас виключено з гри.");
         }
         if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
             return this.replyToUser(ctx, 'Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
         }
-        let extraPlayer = game.players.length && Math.max(...game.players.map(p => p.id === userId && p.extraPlayer)) || 0;
+        let extraPlayer = game.players.length && Math.max(...game.players.map(p => p.id === userId && p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex))) || 0;
         if (extraAction) {
             if (extraAction === 'minus') {
                 if (extraPlayer <= 0) {
                     return;
                 }
-                playerInd = game.players.findIndex(p => p.id === userId && p.extraPlayer === extraPlayer);
+                playerInd = game.players.findIndex(p => p.id === userId && p.extraPlayer === extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
                 game.players.splice(playerInd, 1);
             } else
                 extraPlayer++;
@@ -526,13 +534,16 @@ class Bot {
                 }
                 if (extraPlayer > 0) {
                     return this.replyToUser(ctx, 'Перед тим як змінювати свій статус видмініть похід на гру для додаткових ігроків, яких ви залучили.');
+                } else if (newStatus === 'joined' && subgameIndex) {
+                    const playersItem = game.players.find(p => p.id === userId && !p.extraPlayer && p.subgameIndex !== +subgameIndex && p.status === newStatus);
+                    if (playersItem) return this.replyToUser(ctx, 'Ви вже йдете на гру ' + game.subgames[playersItem.subgameIndex]?.name + '.');
                 }
                 game.players.splice(playerInd, 1);
             }
         }
 
         if (extraAction !== 'minus')
-            game.players.push({ id: userId, name: username, fullName: fullName, extraPlayer, status: newStatus, timestamp });
+            game.players.push({ id: userId, name: username, fullName: fullName, extraPlayer, status: newStatus, timestamp, subgameIndex: parseInt(subgameIndex) || 0 });
         game.players.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         await this.database.updateGame(game._id, { players: game.players });
 
@@ -547,30 +558,86 @@ class Bot {
         };
         const limit = game.maxPlayers || Infinity;
         const dateText = game.date ? ` (${date2text(game.date)})` : '';
-        return textMarkdownNormalize(
-            (!game.isActive ? '‼️ НЕАКТИВНА ‼️\n\n' : '') +
-            `📅 ${game.name}${dateText}\n\n` +
-            `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}${game.maxPlayers ? '/' + game.maxPlayers : ''}\n` +
+        let gameText = '';
+        if (game.subgames && game.subgames.length > 1) {
+            for (let ind = 0; ind < game.subgames.length; ind++) {
+                let subgame = game.subgames[ind];
+                gameText +=
+                `🏆 ${subgame.name}\n` +
+                `👥 Кількість учасників ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).length}${subgame.maxPlayers ? '/' + subgame.maxPlayers : ''}\n` +
+                `✅ Йдуть: ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).slice(0, limit).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
+                `⏳ У черзі: ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).slice(limit).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
+                `❓ Думають: ${players.filter(p => p.status === 'pending' && p.subgameIndex === ind).map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
+                `❌ Не йдуть: ${players.filter(p => p.status === 'declined' && p.subgameIndex === ind).map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n\n`;
+            }
+        } else {
+            gameText += `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}${game.maxPlayers ? '/' + game.maxPlayers : ''}\n` +
             `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, limit).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
             `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(limit).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
             `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
-            `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n\n` +
+            `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n\n`;
+        }
+        return textMarkdownNormalize(
+            (!game.isActive ? '‼️ НЕАКТИВНА ‼️\n\n' : '') +
+            `📅 ${game.name}${dateText}\n\n` + gameText +
             `✍️ Опубліковано ${game.createdByName}`
         );
     }
 
-    buildMarkup(gameId) {
-        return Markup.inlineKeyboard([
-            Markup.button.callback('✅ Йду', `join_${gameId}`),
-            Markup.button.callback('❓ Подумаю', `pending_${gameId}`),
-            Markup.button.callback('❌ Не йду', `decline_${gameId}`),
-            Markup.button.callback('✅ +1', `join_${gameId}_plus`),
-            Markup.button.callback('❌ -1', `decline_${gameId}_minus`)
-        ], {columns: 3});
+    async buildMarkup(gameId) {
+//         return Markup.inlineKeyboard([
+//     // Перша група (1-5)
+//     [Markup.button.callback('1', 'n_1'), Markup.button.callback('2', 'n_2'), Markup.button.callback('3', 'n_3'), Markup.button.callback('4', 'n_4'), Markup.button.callback('5', 'n_5')],
+
+//     // РОЗДІЛЬНИК (кнопка з текстом, яка нікуди не веде)
+//     [Markup.button.callback('─── Наступна група ───', 'none')],
+
+//     // Друга група (6-10)
+//     [Markup.button.callback('6', 'n_6'), Markup.button.callback('7', 'n_7'), Markup.button.callback('8', 'n_8'), Markup.button.callback('9', 'n_9'), Markup.button.callback('10', 'n_10')]
+// ]);
+        // return Markup.inlineKeyboard([
+        //     Markup.button.callback('✅ Йду', `join_${gameId}`),
+        //     Markup.button.callback('❓ Подумаю', `pending_${gameId}`),
+        //     Markup.button.callback('❌ Не йду', `decline_${gameId}`),
+        //     Markup.button.callback('✅ +1', `join_${gameId}_plus`),
+        //     Markup.button.callback('❌ -1', `decline_${gameId}_minus`)
+        // ], {columns: 3});
+        const game = await this.database.getGame(gameId);
+        // console.log(game);
+        if (!game.subgames || game.subgames.length <= 1) {
+            return Markup.inlineKeyboard([
+                Markup.button.callback('✅ Йду', `join_${gameId}`),
+                Markup.button.callback('❓ Думаю', `pending_${gameId}`),
+                Markup.button.callback('❌ Не йду', `decline_${gameId}`),
+                Markup.button.callback('✅ +1', `join_${gameId}_plus`),
+                Markup.button.callback('❌ -1', `decline_${gameId}_minus`)
+            ], {columns: 3});
+        }
+
+        // Підтримка ліг, або підігр
+        const buttons = [];
+        for (let ind = 0; ind < game.subgames.length; ind ++) {
+            let subgame = game.subgames[ind];
+            buttons.push([Markup.button.callback(`⬇⬇ ${subgame.name} ⬇⬇`, 'none')]);
+            buttons.push([
+                Markup.button.callback('✅ Йду', `join_${gameId}/${ind}`),
+                Markup.button.callback('❓ Думаю', `pending_${gameId}/${ind}`),
+                Markup.button.callback('❌ Не йду', `decline_${gameId}/${ind}`)
+            ]);
+            buttons.push([
+                Markup.button.callback('✅ +1', `join_${gameId}/${ind}_plus`),
+                Markup.button.callback('❌ -1', `decline_${gameId}/${ind}_minus`)
+            ]);
+        }
+        return Markup.inlineKeyboard(buttons);
     }
 
     async updateGameMessage(game, gameId) {
         if (!game) return;
+        // console.log('game');
+        // console.log(game);
+        // console.log('gameId');
+        // console.log(gameId);
 
         try {
             return await this.bot.telegram.editMessageText(
@@ -578,7 +645,7 @@ class Bot {
                 game.messageId,
                 null,
                 this.buildTextMessage(game),
-                { parse_mode: 'Markdown', link_preview_options: {is_disabled: true}, ...this.buildMarkup(gameId) }
+                { parse_mode: 'Markdown', link_preview_options: {is_disabled: true}, ...(await this.buildMarkup(gameId)) }
             );
         } catch (error) {
             console.error(error);
@@ -587,7 +654,7 @@ class Bot {
 
     async writeGameMessage(ctx, game, gameId) {
         if (!game) return;
-        return await this.replyOrDoNothing(ctx, this.buildTextMessage(game), { parse_mode: 'Markdown', link_preview_options: {is_disabled: true}, ...this.buildMarkup(gameId) });
+        return await this.replyOrDoNothing(ctx, this.buildTextMessage(game), { parse_mode: 'Markdown', link_preview_options: {is_disabled: true}, ...(await this.buildMarkup(gameId)) });
     }
 
     get invalidDateFormatMessage() {
@@ -634,7 +701,7 @@ class Bot {
 
     async replyToUser(ctx, message) {
         //const replyWarning = (ctx) => this.replyOrDoNothing(ctx, `Для отримання повідомлень від бота перейдіть на нього ${this.botUrl} та натисніть Start.`);
-        const userId = ctx.from.id;
+        const userId = this.getUserId(ctx);
         const user = await this.database.getUser(userId);
         if (user && user.started) {
             try {
@@ -653,7 +720,7 @@ class Bot {
     }
 
     async replyToUserDirectOrDoNothing(ctx, message) {
-        const userId = ctx.from.id;
+        const userId = this.getUserId(ctx);
         const user = await this.database.getUser(userId);
         let sent = false;
         try {
@@ -839,12 +906,17 @@ class Bot {
         return users.some(usr => usr.id === userId);
     }
 
-    async isSuperAdmin(userId) {
+    async isSuperAdmin(userIdOrCtx) {
+        const userId = typeof userIdOrCtx === 'number' ? userIdOrCtx : this.getUserId(userIdOrCtx);
         return (await this.database.getGlobalSettings())?.superAdminId == userId;
     }
 
     getChatId(ctx) {
         return ctx.chat.id;
+    }
+
+    getUserId(ctx) {
+        return ctx.from.id;
     }
 
     isGroup(chatId) {
@@ -891,6 +963,110 @@ class Bot {
             ctx,
             this.emoji.warn + warnText + ' ' + (this.botCommands[cmdName].example || '')
         );
+    }
+
+    parseGameData(args, chatSettings) {
+        const buildRemainingArgs = (args) => {
+            const params = {};
+            const remainingArgs = args.filter(item => {
+                // Перевіряємо, чи елемент починається з '-' і містить '='
+                if (item.startsWith('-') && item.includes('=')) {
+                    const [key, value] = item.split('=');
+                    // key.slice(1) прибирає дефіс попереду (наприклад, 'l1')
+                    params[key.slice(1)] = value;
+                    return false; // Видаляємо з основного масиву
+                }
+                return true; // Залишаємо в тексті
+            });
+            return { params, remainingArgs };
+        }
+
+        const buildSubgames = (params) => {
+            const subgames = [];
+            let i = 0;
+            while (++i) {
+                let key = `g${i}`;
+                if (!(key in params)) break;
+                let name = params[key];
+                let stringDate = params[`d${i}`];
+                if (!stringDate) stringDate = extractDate(name);
+                if (!stringDate) {
+                    // намагання отримати дату через слова, що мають сенс дати
+                    stringDate = parseDateWithTimezone(name);
+                }
+                let date = null, isDateWithoutTime = true;
+                if (stringDate) {
+                    let obj = convertStringDate(stringDate, name);
+                    if (!obj.error) date = obj.date, isDateWithoutTime = obj.isDateWithoutTime;
+                }
+                subgames.push({ name, maxPlayers: parseInt(params[`p${i}`]) || null, date, isDateWithoutTime });
+            }
+            return subgames;
+        }
+
+        const convertStringDate = (stringDate, name) => {
+            // Якщо у даті рівно 3 групи цифр (напр. день, місяць, рік) — спробуємо витягнути час
+            if (getDigitGroupCount(stringDate) === 3) {
+                const time = extractStartTime(name);
+                if (time) stringDate += ' ' + time;
+            }
+
+            const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
+            if (!parsedDate) {
+                return { error: true };
+            }
+
+            let date = new Date(parsedDate);
+            // Перевіряємо кількість цифр вже у оновленому stringDate (з доданим часом, якщо він є)
+            let isDateWithoutTime = getDigitGroupCount(stringDate) < 4;
+            return { date, isDateWithoutTime };
+        }
+
+        const gameData = {};
+        const { params, remainingArgs } = buildRemainingArgs(args);
+        const onlyGameName = (remainingArgs.length != 3 || !isNumeric(remainingArgs[2]));
+        if (!onlyGameName)
+            if (remainingArgs.length < 3) return gameData.error = this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.'), gameData;
+            else if (remainingArgs.length > 3) return gameData.error = this.replyWarning(ctx, cmdName, 'Передана некоректа кількість параметрів. ' + (occurrences(msgText, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '')), gameData;
+
+        let name, maxPlayers, date, isDateWithoutTime, subgames, stringDate;
+        // 1. Парсинг аргументів
+        if (onlyGameName) {
+            if (!remainingArgs.length) {
+                gameData.error = this.replyOrDoNothing(ctx, 'Не вказана назва гри.');
+                return gameData;
+            }
+
+            name = remainingArgs.join(' ');
+            stringDate = extractDate(name) || parseDateWithTimezone(name);
+            maxPlayers = extractPlayers(name);
+        } else {
+            name = remainingArgs[0];
+            stringDate = remainingArgs[1]; // Може бути undefined, обробимо нижче
+
+            maxPlayers = parseInt(remainingArgs[2], 10);
+            if (!maxPlayers || maxPlayers <= 0) {
+                gameData.error = this.replyOrDoNothing(ctx, 'Кількість ігроків повинно бути числом більше 0.');
+                return gameData;
+            }
+        }
+
+        // 2. Спільна логіка обробки дати (усунуто дублювання)
+        if (stringDate) {
+            let obj = convertStringDate(stringDate, name);
+            if (obj.error) {
+                gameData.error = this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
+                return gameData;
+            }
+            date = obj.date, isDateWithoutTime = obj.isDateWithoutTime;
+        } else if (!onlyGameName) {
+            // Якщо це формат без прапорця onlyGameName, але дата не передана — це помилка
+            gameData.error = this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
+            return gameData;
+        }
+        subgames = buildSubgames(params);
+        Object.assign(gameData, { name, maxPlayers, date, isDateWithoutTime, subgames });
+        return gameData;
     }
 }
 

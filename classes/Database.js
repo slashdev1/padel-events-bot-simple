@@ -23,6 +23,7 @@ class Database {
         this.ttlGlobalSettingsMs = Number(config.cacheTtlGlobalSettings || defaultTtlMs);
         this.ttlUserDataMs = Number(config.cacheTtlUserData || defaultTtlMs);
         this.ttlLicensesMs = Number(config.cacheTtlLicenses || defaultTtlMs);
+        this.ttlGameDataMs = Number(config.cacheTtlGameData || defaultTtlMs);
     }
 
     async connect() {
@@ -67,15 +68,28 @@ class Database {
         return result.insertedId;
     }
 
-    async getGame(gameId) {
-        return await this.gamesCollection().findOne({ _id: this._id(gameId) });
+    async getGame(gameId, direct = false) {
+        const fn = () => this.gamesCollection().findOne({ _id: this._id(gameId) });
+        if (!direct) return await fn();
+        //return await this.gamesCollection().findOne({ _id: this._id(gameId) });
+        const cacheKey = `Game:${gameId}`;
+        return await this.cache.getOrSet(
+            cacheKey,
+            fn,
+            this.ttlGameDataMs
+        );
     }
 
     async updateGame(gameId, updateData) {
-        return await this.gamesCollection().updateOne(
+        const result = await this.gamesCollection().updateOne(
             { _id: this._id(gameId)},
             { $set: updateData }
         );
+        if (result.modifiedCount) {
+            // refresh cache with actual data of game
+            await this.getGame(gameId, true);
+        }
+        return result;
     }
 
     async deactivateGame(gameId) {
@@ -90,21 +104,43 @@ class Database {
     }
 
     async deactivateExpiredGames() {
-        const date = new Date();
-        const startOfDate = date.startOfDay();
+        const now = new Date();
+        const startOfDate = now.startOfDay();
+
         const filter = {
+            isActive: true,
             $and: [
-                { isActive: true },
+                // Умови для subgames:
                 {
                     $or: [
-                        { date: { $lte: date }, isDateWithoutTime: false },
+                        // 1. Якщо є subgames, перевіряємо що немає жодного актуального subgame
+                        {
+                            subgames: {
+                                $not: {
+                                    $elemMatch: {
+                                        // актуальний = дата у майбутньому
+                                        date: { $gte: now }
+                                    }
+                                }
+                            }
+                        },
+                        // 2. Якщо немає subgames взагалі → працюємо по game.date
+                        { subgames: { $exists: false } }
+                    ]
+                },
+                // Умови для дати гри (game.date):
+                {
+                    $or: [
+                        // якщо date задана і вже минула
+                        { date: { $lte: now }, isDateWithoutTime: false },
                         { date: { $lt: startOfDate }, isDateWithoutTime: { $ne: false } },
-                        // якщо ігра без дати проведення, то рахуємо її активною протягом тижня від створення
+                        // якщо date = null → тоді дивимось на createdDate
                         { date: null, createdDate: { $lt: startOfDate.addDays(-7) } }
                     ]
                 }
             ]
         };
+        //console.log(now, filter);
 
         const result = await this.gamesCollection().updateMany(filter, { $set: { isActive: false } });
         if (result.modifiedCount) {
