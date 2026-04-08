@@ -19,7 +19,8 @@ const {
     splitWithTail,
     extractPlayers,
     parseDateWithTimezone,
-    getDigitGroupCount
+    getDigitGroupCount,
+    sleep
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
 
@@ -237,7 +238,7 @@ class Bot {
             chatId,
             chatName,
             name,
-            date,
+            date: subgames && subgames.length ? null : date,
             isDateWithoutTime,
             maxPlayers,
             players: [],
@@ -248,7 +249,7 @@ class Bot {
         console.log(`Game ${game.name}`);
 
         const gameId = await this.database.createGame(game);
-        const message = await this.writeGameMessage(ctx, game, gameId);
+        const message = await this.writeGameMessage(ctx, game);
         await this.database.updateGame(gameId, { messageId: message.message_id });
 
         const replyText = `Ви щойно створили гру "${game.name}" (id=${gameId}).` + (game.isDateWithoutTime ? '\n\n' + this.emoji.warn + 'Для того щоб коректно нагадувати та деактивовувати ігри краще зазначати дату ігри разом з часом.' : '');
@@ -269,15 +270,15 @@ class Bot {
         const chatId = game.chatId;
         if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName)) return;
 
-        if (!game.isActive) await this.database.deactivateGame(gameId);
+        if (game.isActive) await this.database.deactivateGame(gameId);
         try {
             await this.bot.telegram.deleteMessage(game.chatId, game.messageId);
         } catch (error) {
-            console.error(error);
+            console.error(error); // TelegramError: 400: Bad Request: message to edit not found
             //await this.replyToUser(ctx, `Сталася помилка при спробі видалення повідомлення з грою: ${error?.code} - ${error?.description}`);
             try {
                 game.isActive = false;
-                await this.updateGameMessage(game, gameId);
+                await this.updateGameMessage(game);
             } catch (error) {}
         }
         const replyText = `Ви щойно видалили гру "${game.name}" (id=${gameId}).`
@@ -339,7 +340,7 @@ class Bot {
             }
         }
         await this.database.updateGame(gameId, updateData);
-        await this.updateGameMessage(game, gameId);
+        await this.updateGameMessage(game);
 
         const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
         this.replyToUserDirectOrDoNothing(ctx, replyText);
@@ -369,7 +370,7 @@ class Bot {
         filtered.forEach((p) => p.status = 'kicked');
         await this.database.updateGame(game._id, { players: game.players });
 
-        this.updateGameMessage(game, gameId);
+        await this.updateGameMessage(game);
         return this.replyToUserDirectOrDoNothing(ctx, `Ігрока "${player}" виключено з гри "${game.name}".`);
     }
 
@@ -503,7 +504,7 @@ class Bot {
         game.players.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         await this.database.updateGame(game._id, { players: game.players });
 
-        this.updateGameMessage(game, gameId);
+        this.updateGameMessage(game);
     }
 
     buildTextMessage(game) {
@@ -541,9 +542,10 @@ class Bot {
         );
     }
 
-    async buildMarkup(gameId) {
-        const game = await this.database.getGame(gameId);
-        // console.log(game);
+    buildMarkup(game) {
+        if (!game) return null;
+
+        const gameId = game._id.toHexString();
         if (!game.subgames || game.subgames.length <= 1) {
             return Markup.inlineKeyboard([
                 Markup.button.callback('✅ Йду', `join_${gameId}`),
@@ -572,7 +574,23 @@ class Bot {
         return Markup.inlineKeyboard(buttons);
     }
 
-    async updateGameMessage(game, gameId) {
+    getGameMessageOptions(game) {
+        // Базові опції повідомлення
+        const options = {
+            parse_mode: 'Markdown',
+            link_preview_options: { is_disabled: true }
+        };
+
+        // Додаємо розмітку (кнопки) тільки якщо гра активна
+        if (game.isActive) {
+            const markup = this.buildMarkup(game);
+            Object.assign(options, markup);
+        }
+
+        return options;
+    }
+
+    async updateGameMessage(game) {
         if (!game) return;
 
         try {
@@ -581,16 +599,21 @@ class Bot {
                 game.messageId,
                 null,
                 this.buildTextMessage(game),
-                { parse_mode: 'Markdown', link_preview_options: {is_disabled: true}, ...(await this.buildMarkup(gameId)) }
+                this.getGameMessageOptions(game)
             );
         } catch (error) {
             console.error(error);
         }
     }
 
-    async writeGameMessage(ctx, game, gameId) {
+    async writeGameMessage(ctx, game) {
         if (!game) return;
-        return await this.replyOrDoNothing(ctx, this.buildTextMessage(game), { parse_mode: 'Markdown', link_preview_options: {is_disabled: true}, ...(await this.buildMarkup(gameId)) });
+
+        return await this.replyOrDoNothing(
+            ctx,
+            this.buildTextMessage(game),
+            this.getGameMessageOptions(game)
+        );
     }
 
     get invalidDateFormatMessage() {
@@ -735,7 +758,7 @@ class Bot {
 
             // Невелика затримка, щоб уникнути Flood Wait від Telegram API
             // (актуально для дуже великих текстів на 10+ частин)
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await sleep(100);
         }
 
         return responses; // Повертаємо масив відповідей від API

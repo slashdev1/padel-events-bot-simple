@@ -29,6 +29,7 @@ class PadelBotApp {
 
         // Initialize bot
         this.bot = new Bot(this.config, this.database, this.webServer);
+        this.database.setBot(this.bot);
 
         // Initialize scheduler
         this.scheduler = new Scheduler(this.database, this.bot);
@@ -47,6 +48,7 @@ class PadelBotApp {
             const data = this.bot.botInfo;
             this.bot.setBotInfo(data.username, `https://t.me/${data.username}`);
             console.log(data.username, `https://t.me/${data.username}`);
+            this.database.deactivateExpiredGames();
         };
 
         let config = this.config.botConfig;

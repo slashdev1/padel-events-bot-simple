@@ -1,6 +1,7 @@
 const { MongoClient, ObjectId } = require('mongodb');
 const Cache = require('./Cache');
 const Config = require('./Config');
+const { sleep } = require('../helpers/utils');
 
 class Database {
     constructor(mongoUri, dbName) {
@@ -8,6 +9,7 @@ class Database {
         this.dbName = dbName;
         this.client = new MongoClient(mongoUri);
         this.db = null;
+        this.bot = null;
 
         const config = new Config();
 
@@ -23,7 +25,11 @@ class Database {
         this.ttlGlobalSettingsMs = Number(config.cacheTtlGlobalSettings || defaultTtlMs);
         this.ttlUserDataMs = Number(config.cacheTtlUserData || defaultTtlMs);
         this.ttlLicensesMs = Number(config.cacheTtlLicenses || defaultTtlMs);
-        this.ttlGameDataMs = Number(config.cacheTtlGameData || defaultTtlMs);
+        // this.ttlGameDataMs = Number(config.cacheTtlGameData || defaultTtlMs);
+    }
+
+    setBot(bot) {
+        this.bot = bot;
     }
 
     async connect() {
@@ -68,16 +74,19 @@ class Database {
         return result.insertedId;
     }
 
-    async getGame(gameId, direct = false) {
-        const fn = () => this.gamesCollection().findOne({ _id: this._id(gameId) });
-        if (!direct) return await fn();
-        //return await this.gamesCollection().findOne({ _id: this._id(gameId) });
-        const cacheKey = `Game:${gameId}`;
-        return await this.cache.getOrSet(
-            cacheKey,
-            fn,
-            this.ttlGameDataMs
-        );
+    // async getGame(gameId, direct = false) {
+    //     const fn = () => this.gamesCollection().findOne({ _id: this._id(gameId) });
+    //     if (!direct) return await fn();
+
+    //     const cacheKey = `Game:${gameId}`;
+    //     return await this.cache.getOrSet(
+    //         cacheKey,
+    //         fn,
+    //         this.ttlGameDataMs
+    //     );
+    // }
+    async getGame(gameId) {
+        return await this.gamesCollection().findOne({ _id: this._id(gameId) });
     }
 
     async updateGame(gameId, updateData) {
@@ -85,10 +94,10 @@ class Database {
             { _id: this._id(gameId)},
             { $set: updateData }
         );
-        if (result.modifiedCount) {
-            // refresh cache with actual data of game
-            await this.getGame(gameId, true);
-        }
+        // if (result.modifiedCount) {
+        //     // refresh cache with actual data of game
+        //     await this.getGame(gameId, true);
+        // }
         return result;
     }
 
@@ -106,46 +115,91 @@ class Database {
     async deactivateExpiredGames() {
         const now = new Date();
         const startOfDate = now.startOfDay();
+        //console.log(now, 'Deactivation...');
 
         const filter = {
             isActive: true,
-            $and: [
-                // Умови для subgames:
+            $or: [
+                // 1. Якщо є хоча б одна підгра з датою (дата гри у такому випадку не має значення), і ВСІ такі дати вже в минулому
                 {
-                    $or: [
-                        // 1. Якщо є subgames, перевіряємо що немає жодного актуального subgame
-                        {
-                            subgames: {
-                                $not: {
-                                    $elemMatch: {
-                                        // актуальний = дата у майбутньому
-                                        date: { $gte: now }
+                    subgames: {
+                        $elemMatch: { date: { $exists: true, $ne: null } }, // є хоча б одна дата
+                        $not: {
+                            $elemMatch: {
+                                $or: [
+                                    // актуальна підгра з часом
+                                    {
+                                        date: { $gte: now },
+                                        isDateWithoutTime: false
+                                    },
+                                    // актуальна підгра без часу (сьогоднішня або майбутня)
+                                    {
+                                        date: { $gte: startOfDate },
+                                        isDateWithoutTime: { $ne: false }
                                     }
-                                }
+                                ]
                             }
-                        },
-                        // 2. Якщо немає subgames взагалі → працюємо по game.date
-                        { subgames: { $exists: false } }
-                    ]
+                        }
+                    }
                 },
-                // Умови для дати гри (game.date):
+                // 2. Якщо основна дата гри минула
                 {
-                    $or: [
-                        // якщо date задана і вже минула
-                        { date: { $lte: now }, isDateWithoutTime: false },
-                        { date: { $lt: startOfDate }, isDateWithoutTime: { $ne: false } },
-                        // якщо date = null → тоді дивимось на createdDate
-                        { date: null, createdDate: { $lt: startOfDate.addDays(-7) } }
+                    date: { $ne: null, $lte: now },
+                    isDateWithoutTime: false
+                },
+                // 3. Якщо дата без часу минула
+                {
+                    date: { $ne: null, $lt: startOfDate },
+                    isDateWithoutTime: { $ne: false }
+                },
+                // 4. ЗАХИСНИЙ ВАРІАНТ:
+                // Якщо немає жодної валідної дати ні в game, ні в subgames
+                // Чекаємо 7 днів від створення
+                {
+                    $and: [
+                        { date: null },
+                        {
+                            $or: [
+                                { subgames: { $exists: false } },
+                                { subgames: { $not: { $elemMatch: { date: { $ne: null } } } } }
+                            ]
+                        },
+                        { createdDate: { $lt: startOfDate.addDays(-7) } }
                     ]
                 }
             ]
         };
         //console.log(now, filter);
 
-        const result = await this.gamesCollection().updateMany(filter, { $set: { isActive: false } });
-        if (result.modifiedCount) {
-            console.log(`Deactivated ${result.modifiedCount} games`);
-        }
+        // const result = await this.gamesCollection().updateMany(filter, { $set: { isActive: false } });
+        // if (result.modifiedCount) {
+        //     console.log(`Deactivated ${result.modifiedCount} games`);
+        // }
+        const gamesToDeactivate = await this.gamesCollection()
+            .find(filter)
+            .toArray();
+        let result;
+
+        if (gamesToDeactivate.length > 0) {
+            result = await this.gamesCollection().updateMany(filter, { $set: { isActive: false } });
+            if (result.modifiedCount) {
+                console.log(`Deactivated ${result.modifiedCount} games:`);
+
+                for (const game of gamesToDeactivate) {
+                    try {
+                        game.isActive = false;
+                        const gameId = game._id.toHexString();
+                        console.log(`    id=${gameId}, ${game.name}`);
+                        if (this.bot?.updateGameMessage) {
+                            await this.bot.updateGameMessage(game, gameId);
+                        }
+                    } finally {
+                        await sleep(100);
+                    }
+                }
+            }
+        } else
+            result = true;
         return result;
     }
 

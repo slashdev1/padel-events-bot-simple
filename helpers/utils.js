@@ -276,6 +276,9 @@ const extractPlayers = (input) => {
 
 // Допоміжна функція для безпечного підрахунку груп з цифр у рядку
 const getDigitGroupCount = (str) => (str?.match(/\d+/g) || []).length;
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
     date.setDate(date.getDate() + days);
@@ -333,5 +336,6 @@ module.exports = {
     strAfter,
     splitWithTail,
     extractPlayers,
-    getDigitGroupCount
+    getDigitGroupCount,
+    sleep
 };
