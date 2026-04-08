@@ -9,17 +9,19 @@
     },
     "add_game": {
         "licensed": true,
-        "aliases": ["game", "add-game", "addgame"],
+        "aliases": ["game", "addgame"],
         "description": "Cтворює гру.",
         "example": "Вкажіть назву гри, дату та кількість гравців. Приклад: /add_game \"Падел матч вт 19-21\" 2025-03-25 8"
     },
     "del_game": {
         "licensed": true,
+        "aliases": ["delgame"],
         "description": "Видаляє гру.",
         "example": "Вкажіть ідентифікатор гри, яку ви хочете видалити. Приклад: /del_game 68c12c687b77b323c396c927"
     },
     "change_game": {
         "licensed": true,
+        "aliases": ["changegame"],
         "description": "Змінює інформацію про гру.",
         "example": "Вкажіть ідентифікатор гри, яку ви хочете змінити, та найменування параметру і його значення (пітримуються параметри: name - найменування гри, date - дата, players - кількість гравців, active - активність гри (0 або 1)). Приклад: /change_game 68c12c687b77b323c396c927 name=\"Падел матч Like a PRO у вівторок 19-21\" "
     },
@@ -29,14 +31,16 @@
         "example": "Вкажіть ідентифікатор гри та нік або імя прізвище, або ідентифікатор гравця. Приклад: /kick 68c12c687b77b323c396c927 looser"
     },
     "active_games": {
+        "aliases": ["games", "activegames"],
         "description": "Показує перелік активних ігор, на які записаний гравець."
     },
     "settings": {
         "description": "Показує налаштування користувача."
     },
     "change_settings": {
+        "aliases": ["changesettings"],
         "description": "Змінює налаштування користувача.",
-        "example": "Вкажіть назву налаштування післяцього знак рівняння та значення. Приклад: /change_settings notificationTerms=\"-1440,-60\" "
+        "example": "Вкажіть назву налаштування після цього знак рівняння та значення. Приклад: /change_settings notificationTerms=\"-1440,-60\" "
     },
     "ver": {
         "description": "Повертає версію бота."

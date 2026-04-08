@@ -42,20 +42,15 @@ class Bot {
     }
 
     setupCommands() {
-        const getCmds = (cmd) => {
-            let item = this.botCommands[cmd];
-            if (!item || !item.aliases) return cmd;
-            return [cmd, ...item.aliases]
-        }
         this.bot.command('start', this.handleStart.bind(this));
         this.bot.command('help', this.handleHelp.bind(this));
-        this.bot.command(getCmds('add_game'), this.handleAddGame.bind(this));
-        this.bot.command(['del_game', 'del-game', 'delgame'], this.handleDelGame.bind(this));
-        this.bot.command(['change_game', 'change-game', 'changegame'], this.handleChangeGame.bind(this));
+        this.bot.command(this.getCmdsByMainName('add_game'), this.handleAddGame.bind(this));
+        this.bot.command(this.getCmdsByMainName('del_game'), this.handleDelGame.bind(this));
+        this.bot.command(this.getCmdsByMainName('change_game'), this.handleChangeGame.bind(this));
         this.bot.command('kick', this.handleKickFromGame.bind(this));
-        this.bot.command(['active_games', 'games', 'active-games', 'activegames'], this.handleActiveGames.bind(this));
+        this.bot.command(this.getCmdsByMainName('active_games'), this.handleActiveGames.bind(this));
         this.bot.command('settings', this.handleSettings.bind(this));
-        this.bot.command(['change_settings', 'change-settings', 'changesettings'], this.handleChangeSettings.bind(this));
+        this.bot.command(this.getCmdsByMainName('change_settings'), this.handleChangeSettings.bind(this));
         this.bot.command('ver', this.handleGetVersion.bind(this));
         this.bot.command('__time', this.handleTime.bind(this));
         this.bot.command('__send_to', this.handleSendTo.bind(this));
@@ -159,7 +154,12 @@ class Bot {
                 .filter(key => this.botCommands[key].isDisplayable !== false)
                 .map(key => {
                     let cmd = this.botCommands[key];
-                    return `    /${key} - ${cmd.description} ${cmd.example || ''}`;
+                    let example = cmd.example || '';
+                    let aliases = cmd.aliases ? 'Аналогічні команди: ' + cmd.aliases.map(v => `/${v}`).join(', ') : '';
+                    let text = cmd.description;
+                    if (example) text += ' ' + example;
+                    if (aliases) text += (text.at(-1) !== '.' ? '.' : '') + ' ' + aliases;
+                    return `    /${key} - ${text}`;
                 }).join('\n') + this.botCommands['help'].extra || ''
         );
     }
@@ -222,57 +222,8 @@ class Bot {
         const chatSettings = await this.database.getChatSettings(chatId) || {};
         if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, cmdName, chatSettings)) return;
 
-        // TODO: /game Гра у форматі 8/12, вівторок -l1=1-8 -p1=8 -l2=9-12 -p2=4
         let { error, name, maxPlayers, date, isDateWithoutTime, subgames } = this.parseGameData(args, chatSettings);
         if (error) return error;
-        // const onlyGameName = (args.length != 3 || !isNumeric(args[2]));
-        // if (!onlyGameName)
-        //     if (args.length < 3) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
-        //     else if (args.length > 3) return this.replyWarning(ctx, cmdName, 'Передана некоректа кількість параметрів. ' + (occurrences(msgText, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : ''));
-
-        // let name;
-        // let maxPlayers;
-        // let date;
-        // let isDateWithoutTime;
-        // if (onlyGameName) {
-        //     const index = msgText.indexOf(' ');
-        //     if (index == -1) return this.replyOrDoNothing(ctx, 'Не вказана назва гри.');
-
-        //     name = msgText.substring(index + 1);
-        //     isDateWithoutTime = true;
-        //     let stringDate = extractDate(name);
-        //     if (!stringDate) {
-        //         // намагання отримати дату через слова, що мають сенс дати
-        //         stringDate = parseDateWithTimezone(name);
-        //     }
-        //     if (stringDate && stringDate.match(/\d+/g).length === 3) {
-        //         const time = extractStartTime(name);
-        //         if (time) stringDate += ' ' + time;
-        //     }
-        //     if (stringDate) {
-        //         const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
-        //         if (!parsedDate) return this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
-        //         date = new Date(parsedDate);
-
-        //         isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
-        //     }
-        //     maxPlayers = extractPlayers(msgText);
-        // } else {
-        //     name = args[0];
-        //     let stringDate = args[1];
-        //     if (stringDate.match(/\d+/g).length === 3) {
-        //         const time = extractStartTime(name);
-        //         if (time) stringDate += ' ' + time;
-        //     }
-        //     const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
-        //     if (!parsedDate) return this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
-        //     date = new Date(parsedDate);
-
-        //     maxPlayers = parseInt(args[2]);
-        //     if (!maxPlayers || maxPlayers <= 0) return this.replyOrDoNothing(ctx, 'Кількість ігроків повинно бути числом більше 0.');
-
-        //     isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
-        // }
 
         const creatorId = this.getUserId(ctx);
         const creatorName = extractUserTitle(ctx.from, false);
@@ -565,15 +516,16 @@ class Bot {
         const dateText = game.date ? ` (${date2text(game.date)})` : '';
         let gameText = '';
         if (game.subgames && game.subgames.length > 1) {
-            for (let ind = 0; ind < game.subgames.length; ind++) {
+            for (let ind = 0, n = game.subgames.length; ind < n; ind++) {
                 let subgame = game.subgames[ind];
+                let separator = (ind === n - 1 ? '' : '—'.repeat(18)) + '\n';
                 gameText +=
                 `🏆 ${subgame.name}\n` +
                 `👥 Кількість учасників ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).length}${subgame.maxPlayers ? '/' + subgame.maxPlayers : ''}\n` +
                 `✅ Йдуть: ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).slice(0, limit).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
                 `⏳ У черзі: ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).slice(limit).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
                 `❓ Думають: ${players.filter(p => p.status === 'pending' && p.subgameIndex === ind).map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
-                `❌ Не йдуть: ${players.filter(p => p.status === 'declined' && p.subgameIndex === ind).map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n\n`;
+                `❌ Не йдуть: ${players.filter(p => p.status === 'declined' && p.subgameIndex === ind).map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n${separator}`;
             }
         } else {
             gameText += `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}${game.maxPlayers ? '/' + game.maxPlayers : ''}\n` +
@@ -590,23 +542,6 @@ class Bot {
     }
 
     async buildMarkup(gameId) {
-//         return Markup.inlineKeyboard([
-//     // Перша група (1-5)
-//     [Markup.button.callback('1', 'n_1'), Markup.button.callback('2', 'n_2'), Markup.button.callback('3', 'n_3'), Markup.button.callback('4', 'n_4'), Markup.button.callback('5', 'n_5')],
-
-//     // РОЗДІЛЬНИК (кнопка з текстом, яка нікуди не веде)
-//     [Markup.button.callback('─── Наступна група ───', 'none')],
-
-//     // Друга група (6-10)
-//     [Markup.button.callback('6', 'n_6'), Markup.button.callback('7', 'n_7'), Markup.button.callback('8', 'n_8'), Markup.button.callback('9', 'n_9'), Markup.button.callback('10', 'n_10')]
-// ]);
-        // return Markup.inlineKeyboard([
-        //     Markup.button.callback('✅ Йду', `join_${gameId}`),
-        //     Markup.button.callback('❓ Подумаю', `pending_${gameId}`),
-        //     Markup.button.callback('❌ Не йду', `decline_${gameId}`),
-        //     Markup.button.callback('✅ +1', `join_${gameId}_plus`),
-        //     Markup.button.callback('❌ -1', `decline_${gameId}_minus`)
-        // ], {columns: 3});
         const game = await this.database.getGame(gameId);
         // console.log(game);
         if (!game.subgames || game.subgames.length <= 1) {
@@ -639,10 +574,6 @@ class Bot {
 
     async updateGameMessage(game, gameId) {
         if (!game) return;
-        // console.log('game');
-        // console.log(game);
-        // console.log('gameId');
-        // console.log(gameId);
 
         try {
             return await this.bot.telegram.editMessageText(
@@ -889,19 +820,9 @@ class Bot {
 
     async hasSuitedLicense(chatSettings, cmdName) {
         const license = (await this.database.getLicenses()).find(elem => elem.type === chatSettings.license);
-        if (license) {
-            const cmdNames = [];
-            for (let key of Object.keys(this.botCommands)) {
-                let aliases = this.botCommands[key].aliases;
-                if (key === cmdName || (aliases && aliases.includes(cmdName))) {
-                    cmdNames.push(key, ...(aliases || []));
-                }
-            }
-            if (!cmdNames.length) cmdNames.push(cmdName);
-            //console.log(cmdNames);
-            return !!license.commands.find(elem => cmdNames.includes(elem));
-        }
-        return false;
+        if (!license) return false;
+        const cmdNames = this.getCmdsByName(cmdName);
+        return !!license.commands.find(elem => cmdNames.includes(elem));
     }
 
     hasPermission(chatSettings, cmdName, userId, createdById, valueIfNoFoundCommand = true) {
@@ -1081,6 +1002,24 @@ class Bot {
         subgames = buildSubgames(params);
         Object.assign(gameData, { name, maxPlayers, date, isDateWithoutTime, subgames });
         return gameData;
+    }
+
+    getCmdsByMainName(cmdName) {
+        let item = this.botCommands[cmdName];
+        if (!item || !item.aliases) return cmdName;
+        return [cmdName, ...item.aliases]
+    }
+
+    getCmdsByName(cmdName) {
+        const cmdNames = [];
+        for (let key of Object.keys(this.botCommands)) {
+            let aliases = this.botCommands[key].aliases;
+            if (key === cmdName || (aliases && aliases.includes(cmdName))) {
+                cmdNames.push(key, ...(aliases || []));
+            }
+        }
+        if (!cmdNames.length) cmdNames.push(cmdName);
+        return cmdNames;
     }
 }
 
