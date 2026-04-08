@@ -238,7 +238,7 @@ class Bot {
             chatId,
             chatName,
             name,
-            date: subgames && subgames.length ? null : date,
+            date: subgames && subgames.some(item => item.date instanceof Date && !isNaN(item.date)) ? null : date,
             isDateWithoutTime,
             maxPlayers,
             players: [],
@@ -456,8 +456,8 @@ class Bot {
     }
 
     async updateGameStatus(ctx, action) {
-        const [gameLeagueId, extraAction] = ctx.match[1].split('_');
-        const [gameId, subgameIndex] = gameLeagueId.split('/');
+        const [fullGameId, extraAction] = ctx.match[1].split('_');
+        const [gameId, subgameIndex] = fullGameId.split('/');
         const userId = this.getUserId(ctx);
         const username = extractUserTitle(ctx.from);
         const fullName = extractUserTitle(ctx.from, false);
@@ -468,7 +468,7 @@ class Bot {
 
         const newStatus = getStatusByAction(action);
         let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
-        if (playerInd != -1 && game.players[playerInd].status === 'kicked') {
+        if (playerInd >= 0 && game.players[playerInd].status === 'kicked') {
             return this.replyToUser(ctx, "Ви не можете змінити статус, бо вас виключено з гри.");
         }
         if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
@@ -496,6 +496,9 @@ class Bot {
                     if (playersItem) return this.replyToUser(ctx, 'Ви вже йдете на гру ' + game.subgames[playersItem.subgameIndex]?.name + '.');
                 }
                 game.players.splice(playerInd, 1);
+            } else if (newStatus === 'joined' && subgameIndex) {
+                const playersItem = game.players.find(p => p.id === userId && !p.extraPlayer && p.subgameIndex !== +subgameIndex && p.status === newStatus);
+                if (playersItem) return this.replyToUser(ctx, 'Ви вже йдете на гру ' + game.subgames[playersItem.subgameIndex]?.name + '.');
             }
         }
 
