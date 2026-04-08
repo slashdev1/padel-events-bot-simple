@@ -20,7 +20,8 @@ const {
     extractPlayers,
     parseDateWithTimezone,
     getDigitGroupCount,
-    sleep
+    sleep,
+    formatToTimeZone
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
 
@@ -379,31 +380,52 @@ class Bot {
         const userId = this.getUserId(ctx);
         const filter = { isActive: true };
         let where = '';
+        let showStatusless = false;
         if (this.isGroup(chatId)) {
             filter.chatId = chatId;
             where = ' у ' + ctx.chat.title;
         }
+        if (await this.isSuperAdmin(ctx)) {
+            // Якщо користувач є супер адміном і він команду з параметром -all, то треба показати взагалі усі ігри, а не тільки ті, для яких користувач лишив свій голос (статус)
+            let [_, ...args] = str2params(ctx.message.text);
+            showStatusless = (args[0] === '-all');
+        }
 
         const games = await this.database.getActiveGames(filter);
+        //console.log(games);
         let response = `Немає активних ігор${where}.`;
         if (games.length) {
             const lines = [];
-            games.forEach(game => {
-                let gameDate = date2int(game.date);
-                if (gameDate && gameDate + 86400000 < Date.now()) return;
-                let status = this.isGroup(chatId) ? ' Ще не має статусу' : '';
+            for (const game of games) {
+                // let gameDate = date2int(game.date);
+                // if (gameDate && gameDate + 86400000 < Date.now()) return;
+                let gameDate = game.date;
+                if (!gameDate) {
+                    let subgame = game.subgames.find(item => item.date instanceof Date && !isNaN(item.date));
+                    gameDate = subgame && subgame.date;
+                }
+
+                let status = this.isGroup(chatId) ? ' Без статусу' : '';
                 let ind = game.players.filter(p => p.status === 'joined').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).findIndex(p => p.id === userId);
                 let limit = game.maxPlayers || Infinity;
                 if (ind >= 0 && ind < limit) status = '✅ Йду';
                 if (ind >= 0 && ind >= limit) status = '⏳ У черзі';
                 if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
                 if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
-                if (game.players.some(p => p.id === userId && p.status === 'kicked')) status = "🦶 Вас виключено";
-                if (status) {
-                    let dateText = game.date ? ` (${date2text(game.date)})` : '';
-                    lines.push({gameDate, text: `📅 ${game.name}${dateText} - ${status}`});
+                if (game.players.some(p => p.id === userId && p.status === 'kicked')) status = '🦶 Вас виключено';
+                if (status || showStatusless) {
+                    //let dateText = game.date ? `${date2text(game.date)}` : '';
+                    let chatSettings = await this.database.getChatSettings(game.chatId);
+                    let timezone = chatSettings?.timezone || this.getDefaultSettings().timezone;
+                    let dateText = '-';
+                    if (gameDate) {
+                        dateText = formatToTimeZone(gameDate, timezone);
+                        if (game.isDateWithoutTime) dateText = dateText.split(' ')[0];
+                    }
+                    let extra = showStatusless ? ` у групі ${game.chatName}` : '';
+                    lines.push({ gameDate, text: `📅 ${dateText}, ${game.name}${extra} - ${status}` });
                 }
-            });
+            }
             if (lines.length) {
                 lines.sort((a, b) => (a.gameDate || 0) - (b.gameDate || 0));
                 response = `📋 **Активні ігри${where}:**\n\n` + lines.map(elem => elem.text).join('\n' + '—'.repeat(18) + '\n');

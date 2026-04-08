@@ -127,6 +127,18 @@ const convertTZ = (date, tzString) => {
     return new Date((typeof date === 'string' || typeof date === 'number' ? new Date(date) : date).toLocaleString('en-US', { timeZone: tzString }));
 }
 
+const formatToTimeZone = (date, timeZone) => {
+    return new Intl.DateTimeFormat('uk-UA', {
+        timeZone: timeZone,
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false // формат 24г
+    }).format(date).replace(',', ''); // Прибираємо кому, якщо вона з'явиться
+}
+
 const parseDate = (str, timezoneOrOffset) => {
     let stringDate = str;
     let parsedDate = Date.parse(stringDate);
@@ -206,12 +218,86 @@ const extractDate = (str) => {
     return dates.length ? (+dates[0].year < 2000 ? String(+dates[0].year + 2000) : dates[0].year) + '.' + dates[0].month + '.' + dates[0].day : null;
 }
 
+// const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
+//     const input = text.toLowerCase();
+
+//     // 1. Отримуємо поточний час саме у вказаній таймзоні
+//     const nowInTZ = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
+//     const currentDay = nowInTZ.getDay(); // 0 (нд) - 6 (сб)
+
+//     const daysMap = {
+//         0: ['неділя', 'воскресенье', 'неділю', '(^|\\s|[,.])(нд|вс)($|\\s|[,.])'],
+//         1: ['понеділок', 'понедельник', '(^|\\s|[,.])(пн)($|\\s|[,.])'],
+//         2: ['вівторок', 'вторник', '(^|\\s|[,.])(вт)($|\\s|[,.])'],
+//         3: ['середа', 'среда', 'середу', 'среду', '(^|\\s|[,.])(ср)($|\\s|[,.])'],
+//         4: ['четвер', 'четверг', '(^|\\s|[,.])(чт)($|\\s|[,.])'],
+//         5: ['п’ятниця', 'п’ятницю', 'пʼятниця', 'пʼятницю', 'пятница', 'пятницу', '(^|\\s|[,.])(пт)($|\\s|[,.])'],
+//         6: ['субота', 'суббота', 'суботу', 'субботу', '(^|\\s|[,.])(сб)($|\\s|[,.])']
+//     };
+
+//     let targetDate = new Date(nowInTZ);
+
+//     // 2. Логіка "сьогодні / завтра"
+//     if (/(сьогодні|сегодня)/.test(input)) {
+//         // Залишаємо targetDate як є (сьогодні)
+//     } else if (/(завтра)/.test(input)) {
+//         targetDate.setDate(nowInTZ.getDate() + 1);
+//     } else {
+//         // 3. Пошук дня тижня
+//         let foundDay = null;
+//         for (let dayIndex in daysMap) {
+//             const variants = daysMap[dayIndex];
+//             const regex = new RegExp(`(${variants.join('|')})`, 'i');
+//             if (regex.test(input)) {
+//                 foundDay = parseInt(dayIndex);
+//                 break;
+//             }
+//         }
+
+//         if (foundDay !== null) {
+//             // Рахуємо різницю днів
+//             let daysDiff = (foundDay - currentDay + 7) % 7 || 7;
+
+//             // Якщо сьогодні субота і людина пише "субота", зазвичай це сьогодні.
+//             // Але якщо ти хочеш, щоб "субота" в суботу означала "наступна субота",
+//             // заміни умови нижче.
+//             targetDate.setDate(nowInTZ.getDate() + daysDiff);
+//         } else {
+//             return null; // Дату не розпізнано
+//         }
+//     }
+
+//     // Повертаємо чисту дату (рік-місяць-день) без залишків старого часу
+//     //return targetDate.getDate().toISOString().split('T')[0];
+//     return targetDate.getFullYear() + '-' + String(targetDate.getMonth() + 1).padStart(2, '0') + '-' + String(targetDate.getDate()).padStart(2, '0')
+// }
 const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
     const input = text.toLowerCase();
 
-    // 1. Отримуємо поточний час саме у вказаній таймзоні
-    const nowInTZ = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
-    const currentDay = nowInTZ.getDay(); // 0 (нд) - 6 (сб)
+    // 1. Отримуємо поточну дату у вказаній ТЗ без посередництва рядків
+    const now = new Date();
+
+    // Створюємо форматер, який поверне компоненти дати для вказаної зони
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        weekday: 'narrow' // для отримання дня тижня (не надійно, краще цифру)
+    });
+
+    // Отримуємо частини дати
+    const parts = formatter.formatToParts(now);
+    const d = {};
+    parts.forEach(p => d[p.type] = p.value);
+
+    // Створюємо чистий об'єкт дати, який відповідає "сьогодні" у цій зоні (о 00:00:00)
+    // Важливо: місяці в JS Date починаються з 0, тому d.month - 1
+    let targetDate = new Date(Date.UTC(d.year, d.month - 1, d.day));
+
+    // Визначаємо день тижня (0-6) саме для цієї зони
+    // Метод getDay() на UTC даті поверне правильний день
+    const currentDay = targetDate.getUTCDay();
 
     const daysMap = {
         0: ['неділя', 'воскресенье', 'неділю', '(^|\\s|[,.])(нд|вс)($|\\s|[,.])'],
@@ -223,19 +309,14 @@ const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
         6: ['субота', 'суббота', 'суботу', 'субботу', '(^|\\s|[,.])(сб)($|\\s|[,.])']
     };
 
-    let targetDate = new Date(nowInTZ);
-
-    // 2. Логіка "сьогодні / завтра"
     if (/(сьогодні|сегодня)/.test(input)) {
-        // Залишаємо targetDate як є (сьогодні)
+        // Вже встановлено на сьогодні
     } else if (/(завтра)/.test(input)) {
-        targetDate.setDate(nowInTZ.getDate() + 1);
+        targetDate.setUTCDate(targetDate.getUTCDate() + 1);
     } else {
-        // 3. Пошук дня тижня
         let foundDay = null;
         for (let dayIndex in daysMap) {
-            const variants = daysMap[dayIndex];
-            const regex = new RegExp(`(${variants.join('|')})`, 'i');
+            const regex = new RegExp(`(${daysMap[dayIndex].join('|')})`, 'i');
             if (regex.test(input)) {
                 foundDay = parseInt(dayIndex);
                 break;
@@ -243,21 +324,16 @@ const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
         }
 
         if (foundDay !== null) {
-            // Рахуємо різницю днів
-            let daysDiff = (foundDay + 7 - currentDay) % 7;
-
-            // Якщо сьогодні субота і людина пише "субота", зазвичай це сьогодні.
-            // Але якщо ти хочеш, щоб "субота" в суботу означала "наступна субота",
-            // заміни умови нижче.
-            targetDate.setDate(nowInTZ.getDate() + daysDiff);
+            // Ваша логіка різниці днів
+            let daysDiff = (foundDay - currentDay + 7) % 7 || 7;
+            targetDate.setUTCDate(targetDate.getUTCDate() + daysDiff);
         } else {
-            return null; // Дату не розпізнано
+            return null;
         }
     }
 
-    // Повертаємо чисту дату (рік-місяць-день) без залишків старого часу
-    //return targetDate.getDate().toISOString().split('T')[0];
-    return targetDate.getFullYear() + '-' + String(targetDate.getMonth() + 1).padStart(2, '0') + '-' + String(targetDate.getDate()).padStart(2, '0')
+    // Форматування результату YYYY-MM-DD
+    return targetDate.toISOString().split('T')[0];
 }
 
 const extractPlayers = (input) => {
@@ -337,5 +413,6 @@ module.exports = {
     splitWithTail,
     extractPlayers,
     getDigitGroupCount,
-    sleep
+    sleep,
+    formatToTimeZone
 };
