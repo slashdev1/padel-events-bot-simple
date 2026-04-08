@@ -42,9 +42,14 @@ class Bot {
     }
 
     setupCommands() {
+        const getCmds = (cmd) => {
+            let item = this.botCommands[cmd];
+            if (!item || !item.aliases) return cmd;
+            return [cmd, ...item.aliases]
+        }
         this.bot.command('start', this.handleStart.bind(this));
         this.bot.command('help', this.handleHelp.bind(this));
-        this.bot.command(['add_game', 'game', 'add-game', 'addgame'], this.handleAddGame.bind(this));
+        this.bot.command(getCmds('add_game'), this.handleAddGame.bind(this));
         this.bot.command(['del_game', 'del-game', 'delgame'], this.handleDelGame.bind(this));
         this.bot.command(['change_game', 'change-game', 'changegame'], this.handleChangeGame.bind(this));
         this.bot.command('kick', this.handleKickFromGame.bind(this));
@@ -885,7 +890,16 @@ class Bot {
     async hasSuitedLicense(chatSettings, cmdName) {
         const license = (await this.database.getLicenses()).find(elem => elem.type === chatSettings.license);
         if (license) {
-            return !!license.commands.find(elem => elem === cmdName);
+            const cmdNames = [];
+            for (let key of Object.keys(this.botCommands)) {
+                let aliases = this.botCommands[key].aliases;
+                if (key === cmdName || (aliases && aliases.includes(cmdName))) {
+                    cmdNames.push(key, ...(aliases || []));
+                }
+            }
+            if (!cmdNames.length) cmdNames.push(cmdName);
+            //console.log(cmdNames);
+            return !!license.commands.find(elem => cmdNames.includes(elem));
         }
         return false;
     }

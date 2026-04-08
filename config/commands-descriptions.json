@@ -9,6 +9,7 @@
     },
     "add_game": {
         "licensed": true,
+        "aliases": ["game", "add-game", "addgame"],
         "description": "Cтворює гру.",
         "example": "Вкажіть назву гри, дату та кількість гравців. Приклад: /add_game \"Падел матч вт 19-21\" 2025-03-25 8"
     },
