@@ -179,6 +179,7 @@ class Bot {
             let parsedDate = normalizeParsedDate(now.getTime(), chatSettings.timezone || chatSettings.timezoneOffset);
             const clientNow = new Date(parsedDate);
             replyText += `\n\nЧас у вас:\n${clientNow}\nЧасова зона/здвиг у вас:\n${chatSettings.timezone || chatSettings.timezoneOffset}\n`;
+
         }
         this.replyToUserDirectOrDoNothing(ctx, replyText);
     }
@@ -532,14 +533,23 @@ class Bot {
         this.updateGameMessage(game);
     }
 
-    buildTextMessage(game) {
+    buildTextMessage(game, chatSettings) {
         const players = game.players || [];
         const m = (user) => {
             const extra = (user.extraPlayer ? ' (+)' : '');
             return `[${user.fullName || user.name}${extra}](tg://user?id=${user.id})`;
         };
         const limit = game.maxPlayers || Infinity;
-        const dateText = game.date ? ` (${date2text(game.date)})` : '';
+        //const dateText = game.date ? ` (${date2text(game.date)})` : '';
+        let gameDate = game.date;
+        //let chatSettings = await this.database.getChatSettings(game.chatId);
+        let timezone = chatSettings?.timezone || this.getDefaultSettings().timezone;
+        let dateText = '';
+        if (gameDate) {
+            dateText = formatToTimeZone(gameDate, timezone);
+            //if (game.isDateWithoutTime)
+                dateText = ` (${dateText.split(' ')[0]})`;
+        }
         let gameText = '';
         if (game.subgames && game.subgames.length > 1) {
             for (let ind = 0, n = game.subgames.length; ind < n; ind++) {
@@ -618,12 +628,13 @@ class Bot {
     async updateGameMessage(game) {
         if (!game) return;
 
+        const chatSettings = await this.database.getChatSettings(game.chatId);
         try {
             return await this.bot.telegram.editMessageText(
                 game.chatId,
                 game.messageId,
                 null,
-                this.buildTextMessage(game),
+                this.buildTextMessage(game, chatSettings),
                 this.getGameMessageOptions(game)
             );
         } catch (error) {
@@ -634,9 +645,10 @@ class Bot {
     async writeGameMessage(ctx, game) {
         if (!game) return;
 
+        const chatSettings = await this.database.getChatSettings(game.chatId);
         return await this.replyOrDoNothing(
             ctx,
-            this.buildTextMessage(game),
+            this.buildTextMessage(game, chatSettings),
             this.getGameMessageOptions(game)
         );
     }
@@ -995,6 +1007,7 @@ class Bot {
             }
 
             const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
+            console.log(parsedDate);
             if (!parsedDate) {
                 return { error: true };
             }
@@ -1022,6 +1035,7 @@ class Bot {
 
             name = remainingArgs.join(' ');
             stringDate = extractDate(name) || parseDateWithTimezone(name);
+            console.log(stringDate);
             maxPlayers = extractPlayers(name);
         } else {
             name = remainingArgs[0];
@@ -1041,6 +1055,7 @@ class Bot {
                 gameData.error = this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
                 return gameData;
             }
+            console.log(JSON.stringify(obj));
             date = obj.date, isDateWithoutTime = obj.isDateWithoutTime;
         } else if (!onlyGameName) {
             // Якщо це формат без прапорця onlyGameName, але дата не передана — це помилка

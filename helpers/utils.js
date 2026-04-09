@@ -274,30 +274,19 @@ const extractDate = (str) => {
 const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
     const input = text.toLowerCase();
 
-    // 1. Отримуємо поточну дату у вказаній ТЗ без посередництва рядків
+    // 1. Отримуємо точний час у цільовій зоні через форматтер
     const now = new Date();
+    const tzString = now.toLocaleString('en-US', { timeZone: timezone });
+    const targetNow = new Date(tzString);
 
-    // Створюємо форматер, який поверне компоненти дати для вказаної зони
-    const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: 'numeric',
-        day: 'numeric',
-        weekday: 'narrow' // для отримання дня тижня (не надійно, краще цифру)
-    });
+    // Отримуємо компоненти саме для цієї часової зони
+    const currentYear = targetNow.getFullYear();
+    const currentMonth = targetNow.getMonth();
+    const currentDate = targetNow.getDate();
+    const currentDay = targetNow.getDay(); // 0-6
 
-    // Отримуємо частини дати
-    const parts = formatter.formatToParts(now);
-    const d = {};
-    parts.forEach(p => d[p.type] = p.value);
-
-    // Створюємо чистий об'єкт дати, який відповідає "сьогодні" у цій зоні (о 00:00:00)
-    // Важливо: місяці в JS Date починаються з 0, тому d.month - 1
-    let targetDate = new Date(Date.UTC(d.year, d.month - 1, d.day));
-
-    // Визначаємо день тижня (0-6) саме для цієї зони
-    // Метод getDay() на UTC даті поверне правильний день
-    const currentDay = targetDate.getUTCDay();
+    // Створюємо об'єкт дати, виставлений на "сьогодні 00:00" за часом зони
+    let targetDate = new Date(currentYear, currentMonth, currentDate);
 
     const daysMap = {
         0: ['неділя', 'воскресенье', 'неділю', '(^|\\s|[,.])(нд|вс)($|\\s|[,.])'],
@@ -312,7 +301,7 @@ const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
     if (/(сьогодні|сегодня)/.test(input)) {
         // Вже встановлено на сьогодні
     } else if (/(завтра)/.test(input)) {
-        targetDate.setUTCDate(targetDate.getUTCDate() + 1);
+        targetDate.setDate(targetDate.getDate() + 1);
     } else {
         let foundDay = null;
         for (let dayIndex in daysMap) {
@@ -324,16 +313,20 @@ const parseDateWithTimezone = (text, timezone = 'Europe/Kyiv') => {
         }
 
         if (foundDay !== null) {
-            // Ваша логіка різниці днів
+            // Математика: якщо сьогодні четвер і просять "четвер" — це +7 днів.
             let daysDiff = (foundDay - currentDay + 7) % 7 || 7;
-            targetDate.setUTCDate(targetDate.getUTCDate() + daysDiff);
+            targetDate.setDate(targetDate.getDate() + daysDiff);
         } else {
             return null;
         }
     }
 
-    // Форматування результату YYYY-MM-DD
-    return targetDate.toISOString().split('T')[0];
+    // Ручне форматування YYYY-MM-DD, щоб уникнути впливу часових поясів .toISOString()
+    const y = targetDate.getFullYear();
+    const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const d = String(targetDate.getDate()).padStart(2, '0');
+
+    return `${y}-${m}-${d}`;
 }
 
 const extractPlayers = (input) => {
