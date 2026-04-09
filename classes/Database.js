@@ -90,6 +90,7 @@ class Database {
     }
 
     async updateGame(gameId, updateData) {
+        updateData.updatedDate = new Date();
         const result = await this.gamesCollection().updateOne(
             { _id: this._id(gameId)},
             { $set: updateData }

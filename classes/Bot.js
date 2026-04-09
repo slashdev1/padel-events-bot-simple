@@ -490,6 +490,9 @@ class Bot {
         const game = await this.database.getGame(gameId);
         if (!game || !game.isActive) return;
 
+        const chatSettings = await this.database.getChatSettings(game.chatId);
+        if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member')) return console.error(`Важливо (updateGameStatus): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
+
         const newStatus = getStatusByAction(action);
         let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
         if (playerInd >= 0 && game.players[playerInd].status === 'kicked') {
@@ -630,6 +633,8 @@ class Bot {
         if (!game) return;
 
         const chatSettings = await this.database.getChatSettings(game.chatId);
+        if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member'))  return console.error(`Важливо (updateGameMessage): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
+
         try {
             return await this.bot.telegram.editMessageText(
                 game.chatId,
