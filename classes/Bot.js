@@ -1,8 +1,8 @@
 const { Telegraf, Markup } = require('telegraf');
 const {
     str2params,
-    date2int,
-    date2text,
+    // date2int,
+    // date2text,
     parseDate,
     getStatusByAction,
     textMarkdownNormalize,
@@ -392,7 +392,7 @@ class Bot {
             showStatusless = (args[0] === '-all');
         }
 
-        const games = await this.database.getActiveGames(filter);
+        const games = await this.database.getActiveGamesWithChatSettings(filter);
         //console.log(games);
         let response = `Немає активних ігор${where}.`;
         if (games.length) {
@@ -416,8 +416,9 @@ class Bot {
                 if (game.players.some(p => p.id === userId && p.status === 'kicked')) status = '🦶 Вас виключено';
                 if (status || showStatusless) {
                     //let dateText = game.date ? `${date2text(game.date)}` : '';
-                    let chatSettings = await this.database.getChatSettings(game.chatId);
-                    let timezone = chatSettings?.timezone || this.getDefaultSettings().timezone;
+                    // let chatSettings = await this.database.getChatSettings(game.chatId);
+                    // let timezone = chatSettings?.timezone || this.getDefaultSettings().timezone;
+                    let timezone = game.timezone || this.getDefaultSettings().timezone;
                     let dateText = '-';
                     if (gameDate) {
                         dateText = formatToTimeZone(gameDate, timezone);

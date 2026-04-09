@@ -108,10 +108,6 @@ class Database {
         );
     }
 
-    async getActiveGames(filter = {}) {
-        return await this.gamesCollection().find({ isActive: true, ...filter }).toArray();
-    }
-
     async deactivateExpiredGames() {
         const now = new Date();
         const startOfDate = now.startOfDay();
@@ -212,10 +208,10 @@ class Database {
         return await this.gamesCollection().find(filter).toArray();
     }
 
-    async getActiveGamesWithSettings(dateStart) {
+    async getActiveGamesWithChatSettings(filter) {
         return await this.gamesCollection().aggregate([
             {
-                $match: { isActive: true, date: { $gte: dateStart }, isDateWithoutTime: false }
+                $match: { ...filter, isActive: true }
             },
             {
                 $lookup: {
@@ -231,10 +227,15 @@ class Database {
                     _id: 1,
                     name: 1,
                     date: 1,
+                    isDateWithoutTime: 1,
                     chatId: 1,
+                    chatName: 1,
                     messageId: 1,
+                    maxPlayers: 1,
                     players: 1,
+                    subgames: 1,
                     //sentReminders: 1,
+                    timezone: '$chatSettings.timezone',
                     notificationTerms: '$chatSettings.notificationTerms',
                     license: '$chatSettings.license'
                 }

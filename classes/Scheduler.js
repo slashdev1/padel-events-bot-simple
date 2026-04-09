@@ -37,7 +37,7 @@ class Scheduler {
         try {
             // Отримуємо ігри з налаштуваннями чатів через aggregation
             const now = new Date();
-            const activeGames = await this.database.getActiveGamesWithSettings(now);
+            const activeGames = await this.database.getActiveGamesWithChatSettings({ date: { $gte: now }, isDateWithoutTime: false });
 
             for (const game of activeGames) {
                 // 1. Нотифікації для груп
