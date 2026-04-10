@@ -4,5 +4,7 @@
     "err": "❗",
     "notif": "🔔",
     "info": "ℹ️",
-    "kick": "🦶"
+    "kick": "🦶",
+    "bell": "🔔",
+    "notfound": "🙈"
 }

@@ -65,6 +65,8 @@ class Bot {
         this.bot.action(/^pending_(.*)$/, (ctx) => this.updateGameStatus(ctx, 'pending'));
         this.bot.action(/^decline_(.*)$/, (ctx) => this.updateGameStatus(ctx, 'decline'));
         this.bot.action(/^activation_(.*)$/, (ctx) => this.handleGameActivation(ctx));
+        this.bot.action(/^notification_(.*)$/, (ctx) => this.handleGameNotification(ctx));
+        this.bot.action(/^none$/, (ctx) => this.showPopup(ctx, this.emoji.warn + 'Натискайте на кнопки нище.'));
     }
 
     setupMyChatMember() {
@@ -489,7 +491,8 @@ class Bot {
         const timestamp = new Date();
 
         const game = await this.database.getGame(gameId);
-        if (!game || !game.isActive) return this.showPopup(ctx, this.emoji.warn + 'Гра неактивна.');
+        if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
+        if (!game.isActive) return this.showPopup(ctx, this.emoji.warn + 'Гра неактивна.');
 
         const chatSettings = await this.database.getChatSettings(game.chatId);
         if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member')) return console.error(`Важливо (updateGameStatus): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
@@ -546,7 +549,7 @@ class Bot {
         const gameId = ctx.match[1].split('_')[0];
 
         const game = await this.database.getGame(gameId);
-        if (!game) return;
+        if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
 
         const chatId = game.chatId;
         const chatSettings = await this.database.getChatSettings(chatId) || {};
@@ -562,6 +565,24 @@ class Bot {
         //const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
         //this.replyToUserDirectOrDoNothing(ctx, replyText);
         this.showPopup(ctx, this.emoji.info + 'Гру ' + (game.isActive ? 'відкрито.' : 'закрито.'));
+    }
+
+    async handleGameNotification(ctx) {
+        const gameId = ctx.match[1].split('_')[0];
+
+        const game = await this.database.getGame(gameId);
+        if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
+
+        const userId = this.getUserId(ctx);
+        const user = await this.database.getUser(userId);
+        if (!user || !user.started) return this.showPopup(ctx, this.emoji.warn + ' Для отримання сповіщень від бота слід перейти до нього на натиснути кнопку Start.');
+
+        if (user.settings?.notificationTerms) return this.showPopup(ctx, this.emoji.warn + ' У вас вже є в налаштуваннях встановлені періоди нагадувань: ' + user.settings?.notificationTerms.split(',').map(v => `за ${-v} хв`).join(', ') + '.');
+
+        const notification = await this.database.createNotification(gameId, userId);
+        if (!notification) return this.showPopup(ctx, this.emoji.err + 'Помилка при створені нагадування. Зверніться до розробника.');
+        if (!notification.isActive) return this.showPopup(ctx, this.emoji.bell + 'Нагадування про гру видалено. Не пропустіть і не запізнюйтесь на гру.');
+        this.showPopup(ctx, this.emoji.bell + 'Нагадаю вам про гру за 1 годину. Набирайтесь сил.');
     }
 
     buildTextMessage(game, chatSettings) {
@@ -613,7 +634,10 @@ class Bot {
 
         const gameId = game._id.toHexString();
         const buttons = [];
-        buttons.push([Markup.button.callback(game.isActive ? '⏸️ Закрити гру' : '▶️ Відкрити гру', `activation_${gameId}`)]);
+        buttons.push([
+            Markup.button.callback(game.isActive ? '⏸️ Закрити гру' : '▶️ Відкрити гру', `activation_${gameId}`),
+            ...(game.isActive ? [Markup.button.callback(this.emoji.bell + 'Нагадати за 1 год.', `notification_${gameId}`)] : [])
+        ]);
         if (!game.isActive) return Markup.inlineKeyboard(buttons);
 
         if (!game.subgames || game.subgames.length <= 1) {
@@ -632,7 +656,7 @@ class Bot {
         // Підтримка ліг, або підігр
         for (let ind = 0; ind < game.subgames.length; ind ++) {
             let subgame = game.subgames[ind];
-            buttons.push([Markup.button.callback(`⬇⬇ ${subgame.name} ⬇⬇`, 'none')]);
+            buttons.push([Markup.button.callback(`👇👇 ${subgame.name} 👇👇`, 'none')]);
             buttons.push([
                 Markup.button.callback('✅ Йду', `join_${gameId}/${ind}`),
                 Markup.button.callback('❓ Думаю', `pending_${gameId}/${ind}`),

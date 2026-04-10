@@ -64,6 +64,10 @@ class Database {
         return this.db.collection('licenses');
     }
 
+    notificationsCollection() {
+        return this.db.collection('notifications');
+    }
+
     _id(id) {
         return typeof id === 'string' ? ObjectId.createFromHexString(id) : id;
     }
@@ -346,6 +350,33 @@ class Database {
             cacheKey,
             async () => await this.licensesCollection().find({}).toArray(),
             this.ttlLicensesMs
+        );
+    }
+
+    async createNotification(gameId, userId)  {
+        return await this.notificationsCollection().findOneAndUpdate(
+            {
+                gameId: gameId,
+                userId: userId
+            },
+            [
+                {
+                    $set: {
+                        isActive: {
+                            $cond: {
+                                if: { $eq: ["$isActive", true] },
+                                then: false,
+                                else: true
+                            }
+                        },
+                        updatedDate: new Date()
+                    }
+                }
+            ],
+            {
+                upsert: true,
+                returnDocument: 'after' // ВАЖЛИВО: кажемо повернути документ ПІСЛЯ оновлення
+            }
         );
     }
 }
