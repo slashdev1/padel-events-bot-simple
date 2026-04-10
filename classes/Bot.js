@@ -414,7 +414,7 @@ class Bot {
                 if (ind >= 0 && ind >= limit) status = '⏳ У черзі';
                 if (game.players.some(p => p.id === userId && p.status === 'pending')) status = '❓ Думаю';
                 if (game.players.some(p => p.id === userId && p.status === 'declined')) status = '❌ Не йду';
-                if (game.players.some(p => p.id === userId && p.status === 'kicked')) status = '🦶 Вас виключено';
+                if (game.players.some(p => p.id === userId && p.status === 'kicked')) status = this.emoji.kick + ' Вас виключено';
                 if (status || showStatusless) {
                     //let dateText = game.date ? `${date2text(game.date)}` : '';
                     // let chatSettings = await this.database.getChatSettings(game.chatId);
@@ -489,7 +489,7 @@ class Bot {
         const timestamp = new Date();
 
         const game = await this.database.getGame(gameId);
-        if (!game || !game.isActive) return;
+        if (!game || !game.isActive) return this.showPopup(ctx, this.emoji.warn + 'Гра неактивна.');
 
         const chatSettings = await this.database.getChatSettings(game.chatId);
         if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member')) return console.error(`Важливо (updateGameStatus): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
@@ -497,16 +497,18 @@ class Bot {
         const newStatus = getStatusByAction(action);
         let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
         if (playerInd >= 0 && game.players[playerInd].status === 'kicked') {
-            return this.replyToUser(ctx, "Ви не можете змінити статус, бо вас виключено з гри.");
+            // return this.replyToUser(ctx, "Ви не можете змінити статус, бо вас виключено з гри.");
+            return this.showPopup(ctx, this.emoji.kick + 'Вас виключено з гри.');
         }
         if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
-            return this.replyToUser(ctx, 'Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
+            // return this.replyToUser(ctx, 'Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
+            return this.showPopup(ctx, this.emoji.warn + 'Спершу натисніть що ви самі йдете на гру.');
         }
         let extraPlayer = game.players.length && Math.max(...game.players.map(p => p.id === userId && p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex))) || 0;
         if (extraAction) {
             if (extraAction === 'minus') {
                 if (extraPlayer <= 0) {
-                    return;
+                    return this.showPopup(ctx, this.emoji.warn + 'Немає додаткових ігроків, яких ви залучили.');
                 }
                 playerInd = game.players.findIndex(p => p.id === userId && p.extraPlayer === extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
                 game.players.splice(playerInd, 1);
@@ -518,15 +520,15 @@ class Bot {
                     return;
                 }
                 if (extraPlayer > 0) {
-                    return this.replyToUser(ctx, 'Перед тим як змінювати свій статус видмініть похід на гру для додаткових ігроків, яких ви залучили.');
+                    return this.showPopup(ctx, this.emoji.warn + 'Перед тим як змінювати свій статус видмініть похід на гру для додаткових ігроків, яких ви залучили.');
                 } else if (newStatus === 'joined' && subgameIndex) {
                     const playersItem = game.players.find(p => p.id === userId && !p.extraPlayer && p.subgameIndex !== +subgameIndex && p.status === newStatus);
-                    if (playersItem) return this.replyToUser(ctx, 'Ви вже йдете на гру ' + game.subgames[playersItem.subgameIndex]?.name + '.');
+                    if (playersItem) return this.showPopup(ctx, this.emoji.warn + 'Ви вже йдете на гру ' + game.subgames[playersItem.subgameIndex]?.name + '.');
                 }
                 game.players.splice(playerInd, 1);
             } else if (newStatus === 'joined' && subgameIndex) {
                 const playersItem = game.players.find(p => p.id === userId && !p.extraPlayer && p.subgameIndex !== +subgameIndex && p.status === newStatus);
-                if (playersItem) return this.replyToUser(ctx, 'Ви вже йдете на гру ' + game.subgames[playersItem.subgameIndex]?.name + '.');
+                if (playersItem) return this.showPopup(ctx, this.emoji.warn + 'Ви вже йдете на гру ' + game.subgames[playersItem.subgameIndex]?.name + '.');
             }
         }
 
@@ -536,6 +538,7 @@ class Bot {
         await this.database.updateGame(game._id, { players: game.players });
 
         this.updateGameMessage(game);
+        this.showPopup(ctx, '');
     }
 
     async handleGameActivation(ctx) {
@@ -556,8 +559,9 @@ class Bot {
         await this.database.updateGame(gameId, updateData);
         await this.updateGameMessage(game);
 
-        const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
-        this.replyToUserDirectOrDoNothing(ctx, replyText);
+        //const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
+        //this.replyToUserDirectOrDoNothing(ctx, replyText);
+        this.showPopup(ctx, this.emoji.info + 'Гру ' + (game.isActive ? 'відкрито.' : 'закрито.'));
     }
 
     buildTextMessage(game, chatSettings) {
@@ -727,12 +731,18 @@ class Bot {
 
     async ensureCommandAccess(ctx, chatSettings, cmdName, userId, createdById, valueIfNoFoundCommand = true) {
         if (!(await this.hasSuitedLicense(chatSettings, cmdName))) {
-            await this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
+            // await this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.');
+            let msg = this.emoji.noaccess + 'Недостатня ліцензія на використання цієї команди.';
+            if (ctx.callbackQuery) this.showPopup(ctx, msg);
+            else this.replyToUserDirectOrDoNothing(ctx, msg);
             return false;
         }
 
         if (!this.hasPermission(chatSettings, cmdName, userId, createdById, valueIfNoFoundCommand)) {
-            await this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
+            // await this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
+            let msg = this.emoji.noaccess + 'Недостатньо прав на використання цієї команди.';
+            if (ctx.callbackQuery) this.showPopup(ctx, msg);
+            else this.replyToUserDirectOrDoNothing(ctx, msg);
             return false;
         }
         return true;
@@ -842,6 +852,12 @@ class Bot {
         }
 
         return responses; // Повертаємо масив відповідей від API
+    }
+
+    showPopup(ctx, msg) {
+        ctx.answerCbQuery(msg, {
+            show_alert: msg.length > 50
+        });
     }
 
     async launch(config, onLaunch) {
