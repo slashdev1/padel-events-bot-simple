@@ -64,6 +64,7 @@ class Bot {
         this.bot.action(/^join_(.*)$/, (ctx) => this.updateGameStatus(ctx, 'join'));
         this.bot.action(/^pending_(.*)$/, (ctx) => this.updateGameStatus(ctx, 'pending'));
         this.bot.action(/^decline_(.*)$/, (ctx) => this.updateGameStatus(ctx, 'decline'));
+        this.bot.action(/^activation_(.*)$/, (ctx) => this.handleGameActivation(ctx));
     }
 
     setupMyChatMember() {
@@ -537,6 +538,28 @@ class Bot {
         this.updateGameMessage(game);
     }
 
+    async handleGameActivation(ctx) {
+        const cmdName = 'change_game';
+        const gameId = ctx.match[1].split('_')[0];
+
+        const game = await this.database.getGame(gameId);
+        if (!game) return;
+
+        const chatId = game.chatId;
+        const chatSettings = await this.database.getChatSettings(chatId) || {};
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
+
+        const updateData = {};
+        updateData.isActive = !game.isActive;
+        game.isActive = updateData.isActive;
+
+        await this.database.updateGame(gameId, updateData);
+        await this.updateGameMessage(game);
+
+        const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
+        this.replyToUserDirectOrDoNothing(ctx, replyText);
+    }
+
     buildTextMessage(game, chatSettings) {
         const players = game.players || [];
         const m = (user) => {
@@ -585,18 +608,24 @@ class Bot {
         if (!game) return null;
 
         const gameId = game._id.toHexString();
+        const buttons = [];
+        buttons.push([Markup.button.callback(game.isActive ? '⏸️ Закрити гру' : '▶️ Відкрити гру', `activation_${gameId}`)]);
+        if (!game.isActive) return Markup.inlineKeyboard(buttons);
+
         if (!game.subgames || game.subgames.length <= 1) {
-            return Markup.inlineKeyboard([
+            buttons.push([
                 Markup.button.callback('✅ Йду', `join_${gameId}`),
                 Markup.button.callback('❓ Думаю', `pending_${gameId}`),
-                Markup.button.callback('❌ Не йду', `decline_${gameId}`),
+                Markup.button.callback('❌ Не йду', `decline_${gameId}`)
+            ]);
+            buttons.push([
                 Markup.button.callback('✅ +1', `join_${gameId}_plus`),
                 Markup.button.callback('❌ -1', `decline_${gameId}_minus`)
-            ], {columns: 3});
+            ]);
+            return Markup.inlineKeyboard(buttons);
         }
 
         // Підтримка ліг, або підігр
-        const buttons = [];
         for (let ind = 0; ind < game.subgames.length; ind ++) {
             let subgame = game.subgames[ind];
             buttons.push([Markup.button.callback(`⬇⬇ ${subgame.name} ⬇⬇`, 'none')]);
@@ -621,10 +650,10 @@ class Bot {
         };
 
         // Додаємо розмітку (кнопки) тільки якщо гра активна
-        if (game.isActive) {
+        //if (game.isActive) {
             const markup = this.buildMarkup(game);
             Object.assign(options, markup);
-        }
+        //}
 
         return options;
     }
@@ -685,6 +714,14 @@ class Bot {
 
         if (chatSettings == null) chatSettings = {};
         Object.assign(chatSettings, await this.getOrCreateChatSettings(ctx, chatId));
+
+        const defaults = this.getDefaultPermissions(chatSettings.license);
+        chatSettings.permissions = chatSettings.permissions || [];
+        const missingPermissions = defaults.filter(defaultItem =>
+            !chatSettings.permissions.some(item => item.command === defaultItem.command)
+        );
+        chatSettings.permissions.push(...missingPermissions);
+
         return await this.ensureCommandAccess(ctx, chatSettings, cmdName, userId, createdById);
     }
 
@@ -694,7 +731,7 @@ class Bot {
             return false;
         }
 
-        if (!this.hasPermission(chatSettings || { permissions: [] }, cmdName, userId, createdById, valueIfNoFoundCommand)) {
+        if (!this.hasPermission(chatSettings, cmdName, userId, createdById, valueIfNoFoundCommand)) {
             await this.replyToUserDirectOrDoNothing(ctx, this.emoji.noaccess + 'У вас немає повноважень на використання цієї команди.');
             return false;
         }
@@ -855,6 +892,15 @@ class Bot {
         };
     }
 
+    getDefaultPermissions(license) {
+        return [
+            { command: 'add_game', appliesTo: 'all' },
+            { command: 'del_game', appliesTo: 'admins,author' },
+            { command: 'change_game', appliesTo: 'admins,author' },
+            { command: 'kick', appliesTo: 'admins,author' }
+        ];
+    }
+
     async makeChatSettings(chatId, ctx) {
         const config = this.getDefaultSettings();
         const chatSettings = {
@@ -865,7 +911,7 @@ class Bot {
             botStatus: 'unknown',
             reminders: [],
             admins: [],
-            permissions: [],
+            permissions: this.getDefaultPermissions(config.license),
             features: [],
             timezone: config.timezone,
             notificationTerms: config.notificationTerms
