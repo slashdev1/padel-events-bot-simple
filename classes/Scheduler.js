@@ -37,9 +37,24 @@ class Scheduler {
         try {
             // Отримуємо ігри з налаштуваннями чатів через aggregation
             const now = new Date();
-            const activeGames = await this.database.getActiveGamesWithChatSettings({ date: { $gte: now }, isDateWithoutTime: false });
+            const activeGames = await this.database.getActiveGamesWithChatSettings();
 
             for (const game of activeGames) {
+                let gameDate = game.date;
+                let isDateWithoutTime = game.isDateWithoutTime;
+                let subgame = game.subgames.find(item => item.date instanceof Date && !isNaN(item.date) && item.date > now);
+                if (subgame) {
+                    gameDate = subgame.date;
+                    isDateWithoutTime = subgame.isDateWithoutTime;
+                }
+                if (isDateWithoutTime || !gameDate || gameDate < now) {
+                    // Нагадування мають сенс:
+                    // 1. коли вказана дата
+                    // 2. тільки коли вказаний час проведення
+                    // 3. коли дата у майбутньому
+                    continue;
+                }
+
                 // 1. Нотифікації для груп
                 let termsString = game.notificationTerms;
                 if (termsString === '') {
@@ -57,7 +72,7 @@ class Scheduler {
 
                         // Рахуємо час, коли має спрацювати нагадування
                         // Оскільки minutesBefore від'ємні (наприклад, -60), додаємо їх
-                        const reminderTime = new Date(game.date.getTime() + minutesBefore * 60000);
+                        const reminderTime = new Date(gameDate.getTime() + minutesBefore * 60000);
                         const timeWindowEnd = new Date(reminderTime.getTime() + this.checkInterval * 60000);
 
                         // Якщо поточний час більший або рівний часу нагадування
@@ -68,19 +83,31 @@ class Scheduler {
                 }
 
                 // 2. Нотифікації для ігроків
+                // 2.1 Ігроки що йдуть
                 const userIds = [...new Set(game.players.filter(p => p.status === 'joined').map(p => p.id))];
+                // 2.2 Ігроки що підписались на нагадування за 1 годину (-60)
+                const userIdsSubscribed = game.notifications.filter(v => userIds.includes(v.userId)).map(v => v.userId);
+                // Усі ігроки
+                userIds.push(...userIdsSubscribed);
                 for (const userId of userIds) {
+                    // TODO: отримувати 1 раз усіх юзерів
                     let user = await this.database.getUser(userId);
                     if (!user || !user.started) continue;
 
                     termsString = user.settings && user.settings.notificationTerms;
-                    if (termsString === '') continue;
-
+                    const isSubscribed = userIdsSubscribed.includes(userId);
+                    if (isSubscribed) {
+                        // Якщо ігрок натиснув, то треба нагадування у будь якому випадку
+                    } else {
+                        // Якщо поле notificationTerms присутнє і воно пусте, це означає що не треба нагадувань
+                        if (termsString === '') continue;
+                    }
                     termsString = termsString || "-1440,-60";
                     const terms = termsString.split(',').map(Number);
+                    if (isSubscribed && !terms.includes(-60)) terms.push(-60); // Дефолтний термін нагадування за 1 годину, якщо ігрок натиснув відповідну кнопку у грі
 
                     for (const minutesBefore of terms) {
-                        const reminderTime = new Date(game.date.getTime() + minutesBefore * 60000);
+                        const reminderTime = new Date(gameDate.getTime() + minutesBefore * 60000);
                         const timeWindowEnd = new Date(reminderTime.getTime() + this.checkInterval * 60000);
 
                         // Якщо поточний час більший або рівний часу нагадування

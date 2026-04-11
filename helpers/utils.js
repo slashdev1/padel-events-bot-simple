@@ -170,27 +170,56 @@ const textMarkdownNormalize = (text) => text.replace(/(?<!(_|\\))_(?!_)/g, '\\_'
 
 const extractUserTitle = (user, useUserName) => user.username && useUserName !== false ? '@' + user.username : (user.first_name + ' ' + (user.last_name || '')).trim();
 
-const extractStartTime = (str) => {
-    const extractTime = (str) => {
-        const divider = /\s*[-—–]\s*/.source;
-        // Дозволяємо обом частинам (початку і кінцю) бути без хвилин
-        const regex = new RegExp(`(\\d{1,2}(?::\\d{2})?)${divider}(\\d{1,2}(?::\\d{2})?)|(\\d{1,2}:\\d{2})`, 'g');
+const matchGameTimeInText = (str) => {
+    if (!str || typeof str !== 'string') return null;
+    const divider = /\s*[-—–]\s*/.source;
+    // Дозволяємо обом частинам (початку і кінцю) бути без хвилин; або одиночний HH:MM
+    const regex = new RegExp(`(\\d{1,2}(?::\\d{2})?)${divider}(\\d{1,2}(?::\\d{2})?)|(\\d{1,2}:\\d{2})`);
+    return regex.exec(str);
+};
 
-        const match = regex.exec(str);
-
-        if (match) {
-            if (match[1]) { // Якщо це діапазон
-                let start = match[1];
-                // Додаємо :00, якщо хвилин немає
-                return start.includes(':') ? start : `${start}:00`;
-            }
-            return match[0]; // Якщо це одиночний час
-        }
-        return null;
+/** Нормалізує фрагмент часу з назви гри до рядка HH:MM (24h). */
+const normalizeGameTimePart = (part) => {
+    if (part == null || part === '') return null;
+    let t = String(part).trim();
+    let h;
+    let m;
+    if (t.includes(':')) {
+        [h, m = '00'] = t.split(':');
+    } else {
+        h = t;
+        m = '00';
     }
+    const hh = Math.min(23, Math.max(0, parseInt(h, 10)));
+    const mm = Math.min(59, Math.max(0, parseInt(m, 10)));
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+};
 
-    return extractTime(str);
-}
+/**
+ * З тексту назви підігри: діапазон "10-12", "10:00—11:30" або один час "14:00".
+ * @returns {{ start: string, end: string | null } | null} start/end як HH:MM; end === null якщо в тексті лише один момент часу
+ */
+const extractTimeRangeFromText = (str) => {
+    const match = matchGameTimeInText(str);
+    if (!match) return null;
+    if (match[1] != null && match[2] != null && match[2] !== '') {
+        return { start: normalizeGameTimePart(match[1]), end: normalizeGameTimePart(match[2]) };
+    }
+    if (match[3]) {
+        return { start: normalizeGameTimePart(match[3]), end: null };
+    }
+    return null;
+};
+
+const extractStartTime = (str) => {
+    const match = matchGameTimeInText(str);
+    if (!match) return null;
+    if (match[1]) {
+        let start = match[1];
+        return start.includes(':') ? start : `${start}:00`;
+    }
+    return match[3] || null;
+};
 
 function parseDateFromString(text) {
     // Регулярний вираз:
@@ -397,6 +426,7 @@ module.exports = {
     extractUserTitle,
     occurrences,
     extractStartTime,
+    extractTimeRangeFromText,
     extractDate,
     parseDateWithTimezone,
     normalizeParsedDate,

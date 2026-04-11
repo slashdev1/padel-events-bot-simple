@@ -11,6 +11,7 @@ const {
     isTrue,
     isNumeric,
     extractStartTime,
+    extractTimeRangeFromText,
     extractDate,
     normalizeParsedDate,
     parseArgs,
@@ -397,6 +398,7 @@ class Bot {
 
         const games = await this.database.getActiveGamesWithChatSettings(filter);
         //console.log(games);
+        const now = new Date();
         let response = `Немає активних ігор${where}.`;
         if (games.length) {
             const lines = [];
@@ -404,9 +406,9 @@ class Bot {
                 // let gameDate = date2int(game.date);
                 // if (gameDate && gameDate + 86400000 < Date.now()) return;
                 let gameDate = game.date;
-                if (!gameDate) {
-                    let subgame = game.subgames.find(item => item.date instanceof Date && !isNaN(item.date));
-                    gameDate = subgame && subgame.date;
+                let subgame = game.subgames.find(item => item.date instanceof Date && !isNaN(item.date) && item.date > now);
+                if (subgame) {
+                    gameDate = subgame.date;
                 }
 
                 let status = this.isGroup(chatId) ? ' Без статусу' : '';
@@ -482,7 +484,107 @@ class Bot {
         await this.sendMessage(userId, this.emoji.info + `Налаштування ${key} оновлене.`);
     }
 
-    async updateGameStatus(ctx, action) {
+    subgameDateMs(subgame) {
+        const d = subgame?.date;
+        if (!d) return null;
+        const t = d instanceof Date ? d.getTime() : new Date(d).getTime();
+        return Number.isNaN(t) ? null : t;
+    }
+
+    hasAnySubgameWithDate(game) {
+        return !!(game.subgames?.some(sg => this.subgameDateMs(sg) != null));
+    }
+
+    /** Для підігри з часом: кінець інтервалу з діапазону в назві (extractTimeRangeFromText) або +2 год за замовчуванням; для дати без часу — увесь календарний день у timezone чату. */
+    getSubgameIntervalBounds(subgame, timeZone) {
+        const ms = this.subgameDateMs(subgame);
+        if (ms == null) return null;
+        const instant = Temporal.Instant.fromEpochMilliseconds(ms);
+        const zdt = instant.toZonedDateTimeISO(timeZone);
+        if (subgame.isDateWithoutTime) {
+            const plainDate = zdt.toPlainDate();
+            const dayStart = plainDate.toZonedDateTime({ timeZone, plainTime: Temporal.PlainTime.from('00:00') });
+            const nextDayStart = plainDate.add({ days: 1 }).toZonedDateTime({ timeZone, plainTime: Temporal.PlainTime.from('00:00') });
+            return { start: dayStart.toInstant().epochMilliseconds, end: nextDayStart.toInstant().epochMilliseconds - 1 };
+        }
+        const plainDate = zdt.toPlainDate();
+        const range = extractTimeRangeFromText(subgame.name || '');
+        const defaultHours = 2;
+        let endZdt;
+        if (range?.start && range.end) {
+            try {
+                const endPt = Temporal.PlainTime.from(range.end);
+                const startPt = Temporal.PlainTime.from(range.start);
+                if (Temporal.PlainTime.compare(endPt, startPt) > 0) {
+                    endZdt = plainDate.toZonedDateTime({ timeZone, plainTime: endPt });
+                } else {
+                    endZdt = zdt.add({ hours: defaultHours });
+                }
+            } catch {
+                endZdt = zdt.add({ hours: defaultHours });
+            }
+        } else {
+            endZdt = zdt.add({ hours: defaultHours });
+        }
+        return { start: zdt.toInstant().epochMilliseconds, end: endZdt.toInstant().epochMilliseconds };
+    }
+
+    intervalsOverlap(a, b) {
+        return a.start < b.end && b.start < a.end;
+    }
+
+    subgameIntervalsOverlap(game, chatSettings, idxA, idxB) {
+        const tz = chatSettings?.timezone || this.getDefaultSettings().timezone;
+        const sgA = game.subgames[idxA];
+        const sgB = game.subgames[idxB];
+        if (!sgA || !sgB) return false;
+        const bA = this.getSubgameIntervalBounds(sgA, tz);
+        const bB = this.getSubgameIntervalBounds(sgB, tz);
+        if (!bA || !bB) return true;
+        return this.intervalsOverlap(bA, bB);
+    }
+
+    findBlockingOtherSubgameSignup(game, chatSettings, userId, targetSubIdx, newStatus) {
+        if (!game.subgames || game.subgames.length <= 1) return null;
+        const hasSchedule = this.hasAnySubgameWithDate(game);
+        const statusBlocks = (s) => s === 'joined' || s === 'pending';
+
+        for (const p of game.players) {
+            if (p.id !== userId || p.extraPlayer) continue;
+            if (p.subgameIndex === targetSubIdx) continue;
+
+            if (!hasSchedule) {
+                if (newStatus === 'joined' && p.status === 'joined') {
+                    return { message: this.emoji.warn + 'Ви вже йдете на гру ' + game.subgames[p.subgameIndex]?.name + '.' };
+                }
+                continue;
+            }
+
+            if (!statusBlocks(newStatus) || !statusBlocks(p.status)) continue;
+
+            const tMs = this.subgameDateMs(game.subgames[targetSubIdx]);
+            const oMs = this.subgameDateMs(game.subgames[p.subgameIndex]);
+            const otherName = game.subgames[p.subgameIndex]?.name || '';
+
+            if (tMs == null || oMs == null) {
+                return { message: this.emoji.warn + 'Ви вже відмітили статус у підігрі «' + otherName + '».' };
+            }
+
+            if (this.subgameIntervalsOverlap(game, chatSettings, targetSubIdx, p.subgameIndex)) {
+                return { message: this.emoji.warn + 'Час цієї підігри перетинається з «' + otherName + '».' };
+            }
+        }
+        return null;
+    }
+
+    checkSubgameSignupConflict(game, chatSettings, userId, subgameIndexStr, newStatus) {
+        if (!subgameIndexStr) return null;
+        const hasSchedule = this.hasAnySubgameWithDate(game);
+        if (newStatus !== 'joined' && !(hasSchedule && newStatus === 'pending')) return null;
+        return this.findBlockingOtherSubgameSignup(game, chatSettings, userId, +subgameIndexStr, newStatus)?.message ?? null;
+    }
+
+    async updateGameStatus_old(ctx, action) {
         const [fullGameId, extraAction] = ctx.match[1].split('_');
         const [gameId, subgameIndex] = fullGameId.split('/');
         const userId = this.getUserId(ctx);
@@ -495,7 +597,7 @@ class Bot {
         if (!game.isActive) return this.showPopup(ctx, this.emoji.warn + 'Гра неактивна.');
 
         const chatSettings = await this.database.getChatSettings(game.chatId);
-        if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member')) return console.error(`Важливо (updateGameStatus): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
+        if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member')) return console.error(`Важливо (updateGameStatus_old): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
 
         const newStatus = getStatusByAction(action);
         let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
@@ -544,6 +646,68 @@ class Bot {
         this.showPopup(ctx, '');
     }
 
+    async updateGameStatus(ctx, action) {
+        const [fullGameId, extraAction] = ctx.match[1].split('_');
+        const [gameId, subgameIndex] = fullGameId.split('/');
+        const userId = this.getUserId(ctx);
+        const username = extractUserTitle(ctx.from);
+        const fullName = extractUserTitle(ctx.from, false);
+        const timestamp = new Date();
+
+        const game = await this.database.getGame(gameId);
+        if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
+        if (!game.isActive) return this.showPopup(ctx, this.emoji.warn + 'Гра неактивна.');
+
+        const chatSettings = await this.database.getChatSettings(game.chatId);
+        if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member')) return console.error(`Важливо (updateGameStatus): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
+
+        const newStatus = getStatusByAction(action);
+        let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
+        if (playerInd >= 0 && game.players[playerInd].status === 'kicked') {
+            return this.showPopup(ctx, this.emoji.kick + 'Вас виключено з гри.');
+        }
+        if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
+            if (!chatSettings.allowVotePlusWithoutMainPlayers) {
+                return this.showPopup(ctx, this.emoji.warn + 'Спершу натисніть що ви самі йдете на гру.');
+            }
+        }
+        let extraPlayer = game.players.length && Math.max(...game.players.map(p => p.id === userId && p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex))) || 0;
+        if (extraAction) {
+            if (extraAction === 'minus') {
+                if (extraPlayer <= 0) {
+                    return this.showPopup(ctx, this.emoji.warn + 'Немає додаткових ігроків, яких ви залучили.');
+                }
+                playerInd = game.players.findIndex(p => p.id === userId && p.extraPlayer === extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
+                game.players.splice(playerInd, 1);
+            } else
+                extraPlayer++;
+        } else {
+            if (playerInd >= 0) {
+                if (game.players[playerInd].status === newStatus) {
+                    return;
+                }
+                if (extraPlayer > 0) {
+                    return this.showPopup(ctx, this.emoji.warn + 'Перед тим як змінювати свій статус видмініть похід на гру для додаткових ігроків, яких ви залучили.');
+                } else {
+                    const conflict = this.checkSubgameSignupConflict(game, chatSettings, userId, subgameIndex, newStatus);
+                    if (conflict) return this.showPopup(ctx, conflict);
+                }
+                game.players.splice(playerInd, 1);
+            } else {
+                const conflict = this.checkSubgameSignupConflict(game, chatSettings, userId, subgameIndex, newStatus);
+                if (conflict) return this.showPopup(ctx, conflict);
+            }
+        }
+
+        if (extraAction !== 'minus')
+            game.players.push({ id: userId, name: username, fullName: fullName, extraPlayer, status: newStatus, timestamp, subgameIndex: parseInt(subgameIndex) || 0 });
+        game.players.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        await this.database.updateGame(game._id, { players: game.players });
+
+        this.updateGameMessage(game);
+        this.showPopup(ctx, '');
+    }
+
     async handleGameActivation(ctx) {
         const cmdName = 'change_game';
         const gameId = ctx.match[1].split('_')[0];
@@ -571,9 +735,20 @@ class Bot {
         const gameId = ctx.match[1].split('_')[0];
 
         const game = await this.database.getGame(gameId);
-        if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
+        if (!game) return this.showPopup(ctx, this.emoji.notfound + ' Гру не знайдено.');
+
+        let gameDate = game.date;
+        let isDateWithoutTime = game.isDateWithoutTime;
+        let subgame = game.subgames.find(item => item.date instanceof Date && !isNaN(item.date));
+        if (subgame) {
+            gameDate = subgame.date;
+            isDateWithoutTime = subgame.isDateWithoutTime;
+        }
+        if (isDateWithoutTime || !gameDate) return this.showPopup(ctx, this.emoji.warn + ' Нагадування можливі лише для ігр з вказаною датою та часом.');
 
         const userId = this.getUserId(ctx);
+        if (!game.players.some(p => p.status === 'joined' && p.id === userId)) return this.showPopup(ctx, this.emoji.warn + ' Спершу натисніть що йдете на гру.');
+
         const user = await this.database.getUser(userId);
         if (!user || !user.started) return this.showPopup(ctx, this.emoji.warn + ' Для отримання сповіщень від бота слід перейти до нього на натиснути кнопку Start.');
 
@@ -581,7 +756,7 @@ class Bot {
 
         const notification = await this.database.createNotification(gameId, userId);
         if (!notification) return this.showPopup(ctx, this.emoji.err + 'Помилка при створені нагадування. Зверніться до розробника.');
-        if (!notification.isActive) return this.showPopup(ctx, this.emoji.bell + 'Нагадування про гру видалено. Не пропустіть і не запізнюйтесь на гру.');
+        if (!notification.isActive) return this.showPopup(ctx, this.emoji.bell + 'Нагадування про гру видалено. Не запізнюйтесь на гру.');
         this.showPopup(ctx, this.emoji.bell + 'Нагадаю вам про гру за 1 годину. Набирайтесь сил.');
     }
 
@@ -954,7 +1129,8 @@ class Bot {
             permissions: this.getDefaultPermissions(config.license),
             features: [],
             timezone: config.timezone,
-            notificationTerms: config.notificationTerms
+            notificationTerms: config.notificationTerms,
+            allowVotePlusWithoutMainPlayers: false
         }
         if (!chatSettings.allMembersAreAdministrators) {
             const admins = this.isGroup(chatId) && await this.bot.telegram.getChatAdministrators(chatId);
@@ -1147,7 +1323,7 @@ class Bot {
                 gameData.error = this.replyOrDoNothing(ctx, this.invalidDateFormatMessage);
                 return gameData;
             }
-            console.log(JSON.stringify(obj));
+            //console.log(JSON.stringify(obj));
             date = obj.date, isDateWithoutTime = obj.isDateWithoutTime;
         } else if (!onlyGameName) {
             // Якщо це формат без прапорця onlyGameName, але дата не передана — це помилка

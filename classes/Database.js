@@ -213,11 +213,46 @@ class Database {
         return await this.gamesCollection().find(filter).toArray();
     }
 
+    // async getActiveGamesWithChatSettings(filter) {
+    //     return await this.gamesCollection().aggregate([
+    //         {
+    //             $match: { ...filter, isActive: true }
+    //         },
+    //         {
+    //             $lookup: {
+    //                 from: 'chatSettings',
+    //                 localField: 'chatId',
+    //                 foreignField: 'chatId',
+    //                 as: 'chatSettings'
+    //             }
+    //         },
+    //         { $unwind: { path: '$chatSettings', preserveNullAndEmptyArrays: true } },
+    //         {
+    //             $project: {
+    //                 _id: 1,
+    //                 name: 1,
+    //                 date: 1,
+    //                 isDateWithoutTime: 1,
+    //                 chatId: 1,
+    //                 chatName: 1,
+    //                 messageId: 1,
+    //                 maxPlayers: 1,
+    //                 players: 1,
+    //                 subgames: 1,
+    //                 //sentReminders: 1,
+    //                 timezone: '$chatSettings.timezone',
+    //                 notificationTerms: '$chatSettings.notificationTerms',
+    //                 license: '$chatSettings.license'
+    //             }
+    //         }
+    //     ]).toArray();
+    // }
     async getActiveGamesWithChatSettings(filter) {
         return await this.gamesCollection().aggregate([
             {
                 $match: { ...filter, isActive: true }
             },
+            // 1. Приєднуємо налаштування чату
             {
                 $lookup: {
                     from: 'chatSettings',
@@ -227,6 +262,30 @@ class Database {
                 }
             },
             { $unwind: { path: '$chatSettings', preserveNullAndEmptyArrays: true } },
+
+            // 2. Приєднуємо ТІЛЬКИ активні сповіщення для конкретної гри
+            {
+                $lookup: {
+                    from: 'notifications',
+                    let: { game_id: '$_id' }, // Створюємо змінну з ID гри
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        // Порівнюємо gameId (якщо він у вас збережений як рядок, додайте конвертацію)
+                                        { $eq: ['$gameId', '$$game_id'] },
+                                        { $eq: ['$isActive', true] }
+                                    ]
+                                }
+                            }
+                        }
+                    ],
+                    as: 'notifications'
+                }
+            },
+
+            // 3. Формуємо фінальний об'єкт
             {
                 $project: {
                     _id: 1,
@@ -239,10 +298,11 @@ class Database {
                     maxPlayers: 1,
                     players: 1,
                     subgames: 1,
-                    //sentReminders: 1,
                     timezone: '$chatSettings.timezone',
                     notificationTerms: '$chatSettings.notificationTerms',
-                    license: '$chatSettings.license'
+                    license: '$chatSettings.license',
+                    // Додаємо нове поле
+                    notifications: 1
                 }
             }
         ]).toArray();
@@ -356,7 +416,7 @@ class Database {
     async createNotification(gameId, userId)  {
         return await this.notificationsCollection().findOneAndUpdate(
             {
-                gameId: gameId,
+                gameId: this._id(gameId),
                 userId: userId
             },
             [
