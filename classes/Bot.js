@@ -67,6 +67,7 @@ class Bot {
         this.bot.action(/^decline_(.*)$/, (ctx) => this.updateGameStatus(ctx, 'decline'));
         this.bot.action(/^activation_(.*)$/, (ctx) => this.handleGameActivation(ctx));
         this.bot.action(/^notification_(.*)$/, (ctx) => this.handleGameNotification(ctx));
+        this.bot.action(/^setup_(.*)$/, (ctx) => this.handleGameSetup(ctx));
         this.bot.action(/^none$/, (ctx) => this.showPopup(ctx, this.emoji.warn + 'Натискайте на кнопки нище.'));
     }
 
@@ -731,6 +732,20 @@ class Bot {
         this.showPopup(ctx, this.emoji.info + 'Гру ' + (game.isActive ? 'відкрито.' : 'закрито.'));
     }
 
+    async handleGameSetup(ctx) {
+        const cmdName = 'change_game';
+        const gameId = ctx.match[1].split('_')[0];
+
+        const game = await this.database.getGame(gameId);
+        if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
+
+        const chatId = game.chatId;
+        const chatSettings = await this.database.getChatSettings(chatId) || {};
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
+
+        this.showPopup(ctx, 'Даний функціонал у розробці. Слідкуйте за оновленнями.');
+    }
+
     async handleGameNotification(ctx) {
         const gameId = ctx.match[1].split('_')[0];
 
@@ -810,8 +825,11 @@ class Bot {
         const gameId = game._id.toHexString();
         const buttons = [];
         buttons.push([
-            Markup.button.callback(game.isActive ? '⏸️ Закрити гру' : '▶️ Відкрити гру', `activation_${gameId}`),
-            ...(game.isActive ? [Markup.button.callback(this.emoji.bell + 'Нагадати за 1 год.', `notification_${gameId}`)] : [])
+            Markup.button.callback(game.isActive ? '⏸️ Закрити' : '▶️ Відкрити гру', `activation_${gameId}`),
+            ...(game.isActive ? [
+                Markup.button.callback(this.emoji.bell + 'За 1 год.', `notification_${gameId}`),
+                Markup.button.callback('⚙️', `setup_${gameId}`)
+            ] : []),
         ]);
         if (!game.isActive) return Markup.inlineKeyboard(buttons);
 
