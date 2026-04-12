@@ -180,9 +180,9 @@ class Bot {
         let replyText = `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}\nЧасовий здвиг на сервері:\n${now.getTimezoneOffset()} хв.`;
         const chatSettings = await this.database.getChatSettings(chatId);
         if (chatSettings) {
-            let parsedDate = normalizeParsedDate(now.getTime(), chatSettings.timezone || chatSettings.timezoneOffset);
+            let parsedDate = normalizeParsedDate(now.getTime(), chatSettings.settings.timezone);
             const clientNow = new Date(parsedDate);
-            replyText += `\n\nЧас у вас:\n${clientNow}\nЧасова зона/здвиг у вас:\n${chatSettings.timezone || chatSettings.timezoneOffset}\n`;
+            replyText += `\n\nЧас у вас:\n${clientNow}\nЧасова зона/здвиг у вас:\n${chatSettings.settings.timezone}\n`;
 
         }
         this.replyToUserDirectOrDoNothing(ctx, replyText);
@@ -335,7 +335,7 @@ class Bot {
             } else if (key === 'date') {
                 const stringDate = supportedParams[key];
                 //const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
-                const parsedDate = parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
+                const parsedDate = parseDate(stringDate, chatSettings.settings.timezone);
                 if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.invalidDateFormatMessage);
                 updateData.date = new Date(parsedDate);
                 game.date = updateData.date;
@@ -534,7 +534,7 @@ class Bot {
     }
 
     subgameIntervalsOverlap(game, chatSettings, idxA, idxB) {
-        const tz = chatSettings?.timezone || this.getDefaultSettings().timezone;
+        const tz = chatSettings?.settings?.timezone || this.getDefaultSettings().timezone;
         const sgA = game.subgames[idxA];
         const sgB = game.subgames[idxB];
         if (!sgA || !sgB) return false;
@@ -667,7 +667,7 @@ class Bot {
             return this.showPopup(ctx, this.emoji.kick + 'Вас виключено з гри.');
         }
         if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
-            if (!chatSettings.allowVotePlusWithoutMainPlayers) {
+            if (!chatSettings.settings?.allowVotePlusWithoutMainPlayers) {
                 return this.showPopup(ctx, this.emoji.warn + 'Спершу натисніть що ви самі йдете на гру.');
             }
         }
@@ -770,7 +770,7 @@ class Bot {
         //const dateText = game.date ? ` (${date2text(game.date)})` : '';
         let gameDate = game.date;
         //let chatSettings = await this.database.getChatSettings(game.chatId);
-        let timezone = chatSettings?.timezone || this.getDefaultSettings().timezone;
+        let timezone = chatSettings?.settings?.timezone || this.getDefaultSettings().timezone;
         let dateText = '';
         if (gameDate) {
             dateText = formatToTimeZone(gameDate, timezone);
@@ -896,11 +896,11 @@ class Bot {
     }
 
     parseDateByChatSettings(stringDate, chatSettings = {}) {
-        if (chatSettings.timezone) {
+        if (chatSettings.settings.timezone) {
             const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T').replace(/T(\d):/, "T0$1:"); // T9:00 -> T09:00
-            return Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.timezone}]`).toInstant().toString();
+            return Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.settings.timezone}]`).toInstant().toString();
         }
-        return parseDate(stringDate, chatSettings.timezone || chatSettings.timezoneOffset);
+        return parseDate(stringDate, chatSettings.settings.timezone);
     }
 
     async getOrCreateChatSettings(ctx, chatId) {
@@ -1128,9 +1128,11 @@ class Bot {
             admins: [],
             permissions: this.getDefaultPermissions(config.license),
             features: [],
-            timezone: config.timezone,
-            notificationTerms: config.notificationTerms,
-            allowVotePlusWithoutMainPlayers: false
+            settings: {
+                timezone: config.timezone,
+                notificationTerms: config.notificationTerms,
+                allowVotePlusWithoutMainPlayers: false
+            }
         }
         if (!chatSettings.allMembersAreAdministrators) {
             const admins = this.isGroup(chatId) && await this.bot.telegram.getChatAdministrators(chatId);

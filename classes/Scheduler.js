@@ -83,12 +83,9 @@ class Scheduler {
                 }
 
                 // 2. Нотифікації для ігроків
-                // 2.1 Ігроки що йдуть
                 const userIds = [...new Set(game.players.filter(p => p.status === 'joined').map(p => p.id))];
-                // 2.2 Ігроки що підписались на нагадування за 1 годину (-60)
+                // Ігроки що підписались на нагадування за 1 годину (-60)
                 const userIdsSubscribed = game.notifications.filter(v => userIds.includes(v.userId)).map(v => v.userId);
-                // Усі ігроки
-                userIds.push(...userIdsSubscribed);
                 for (const userId of userIds) {
                     // TODO: отримувати 1 раз усіх юзерів
                     let user = await this.database.getUser(userId);
@@ -219,5 +216,3 @@ class Scheduler {
 }
 
 module.exports = Scheduler;
-
-

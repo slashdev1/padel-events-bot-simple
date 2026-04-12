@@ -298,8 +298,8 @@ class Database {
                     maxPlayers: 1,
                     players: 1,
                     subgames: 1,
-                    timezone: '$chatSettings.timezone',
-                    notificationTerms: '$chatSettings.notificationTerms',
+                    timezone: '$chatSettings.settings.timezone',
+                    notificationTerms: '$chatSettings.settings.notificationTerms',
                     license: '$chatSettings.license',
                     // Додаємо нове поле
                     notifications: 1
@@ -403,6 +403,15 @@ class Database {
         );
     }
 
+    async updateGlobalSettings(fields) {
+        const result = await this.globalSettingsCollection().updateOne(
+            {},
+            { $set: fields},
+            { upsert: true }
+        );
+        return result;
+    }
+
     // Licenses
     async getLicenses() {
         const cacheKey = `licenses`;
@@ -442,4 +451,3 @@ class Database {
 }
 
 module.exports = Database;
-

@@ -3,8 +3,7 @@ const Database = require('./classes/Database');
 const WebServer = require('./classes/WebServer');
 const Bot = require('./classes/Bot');
 const Scheduler = require('./classes/Scheduler');
-//const Temporal = require('@js-temporal/polyfill');
-const { Temporal } = require('@js-temporal/polyfill');
+const Migration = require('./classes/Migration');
 
 class PadelBotApp {
     constructor() {
@@ -13,6 +12,7 @@ class PadelBotApp {
         this.webServer = null;
         this.bot = null;
         this.scheduler = null;
+        this.migration = new Migration(this.database);
     }
 
     async start() {
@@ -20,6 +20,8 @@ class PadelBotApp {
 
         // Connect to database
         await this.database.connect();
+        // Run migration db data
+        await this.migration.run();
 
         // Initialize web server if needed
         if (this.config.useExpress) {
