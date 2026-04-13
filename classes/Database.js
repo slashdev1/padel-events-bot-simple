@@ -3,6 +3,13 @@ const Cache = require('./Cache');
 const Config = require('./Config');
 const { sleep } = require('../helpers/utils');
 
+const GameStatus = Object.freeze({
+    ACTIVE: "active",      // гра відкрита, показуємо всі кнопки
+    INACTIVE: "inactive",  // гра закрита вручну, показуємо лише "Відкрити гру"
+    EXPIRED: "expired",    // гра закрита механізмом deactivateExpiredGames, не показуємо кнопки
+    DELETED: "deleted"
+});
+
 class Database {
     constructor(mongoUri, dbName) {
         this.mongoUri = mongoUri;
@@ -25,7 +32,7 @@ class Database {
         this.ttlGlobalSettingsMs = Number(config.cacheTtlGlobalSettings || defaultTtlMs);
         this.ttlUserDataMs = Number(config.cacheTtlUserData || defaultTtlMs);
         this.ttlLicensesMs = Number(config.cacheTtlLicenses || defaultTtlMs);
-        // this.ttlGameDataMs = Number(config.cacheTtlGameData || defaultTtlMs);
+        this.ttlGameDataMs = Number(config.cacheTtlGameData || defaultTtlMs);
     }
 
     setBot(bot) {
@@ -36,6 +43,7 @@ class Database {
         await this.client.connect();
         this.db = this.client.db(this.dbName);
         console.log(`Connected to MongoDB (db ${this.dbName})`);
+        await this.ensureGamePlayersIndexes();
     }
 
     async disconnect() {
@@ -68,58 +76,168 @@ class Database {
         return this.db.collection('notifications');
     }
 
+    gamePlayersCollection() {
+        return this.db.collection('gamePlayers');
+    }
+
     _id(id) {
         return typeof id === 'string' ? ObjectId.createFromHexString(id) : id;
     }
 
+    _isDuplicateKeyError(err) {
+        return err && (err.code === 11000 || err.code === 11001);
+    }
+
+    _publicGamePlayer(doc) {
+        if (!doc) return null;
+        return {
+            id: doc.id,
+            name: doc.name,
+            fullName: doc.fullName,
+            extraPlayer: doc.extraPlayer ?? 0,
+            status: doc.status,
+            timestamp: doc.timestamp,
+            subgameIndex: doc.subgameIndex ?? 0
+        };
+    }
+
+    async ensureGamePlayersIndexes() {
+        if (!this.db) return;
+        const coll = this.gamePlayersCollection();
+        await coll.createIndex(
+            { gameId: 1, id: 1, extraPlayer: 1, subgameIndex: 1 },
+            { unique: true, name: 'gamePlayer_unique_slot' }
+        );
+        await coll.createIndex({ gameId: 1, timestamp: 1 }, { name: 'gamePlayer_by_game_time' });
+    }
+
+    async getGamePlayers(gameId) {
+        const oid = this._id(gameId);
+        const rows = await this.gamePlayersCollection()
+            .find({ gameId: oid })
+            .sort({ timestamp: 1 })
+            .toArray();
+        return rows.map((d) => this._publicGamePlayer(d));
+    }
+
+    getGameCacheKey(gameId) {
+        return `Game:${String(gameId)}`;
+    }
+
+    invalidateGameCache(gameId) {
+        this.cache.delete(this.getGameCacheKey(gameId));
+    }
+
+    async insertGamePlayer(gameId, player) {
+        const oid = this._id(gameId);
+        const doc = {
+            gameId: oid,
+            id: player.id,
+            name: player.name,
+            fullName: player.fullName,
+            extraPlayer: player.extraPlayer ?? 0,
+            status: player.status,
+            timestamp: player.timestamp instanceof Date ? player.timestamp : new Date(),
+            subgameIndex: player.subgameIndex ?? 0
+        };
+        try {
+            await this.gamePlayersCollection().insertOne(doc);
+            return { ok: true };
+        } catch (err) {
+            if (this._isDuplicateKeyError(err)) return { ok: false, duplicate: true };
+            throw err;
+        }
+    }
+
+    async updateGamePlayerSlot(gameId, slot, setFields) {
+        const oid = this._id(gameId);
+        await this.gamePlayersCollection().updateOne(
+            {
+                gameId: oid,
+                id: slot.id,
+                extraPlayer: slot.extraPlayer ?? 0,
+                subgameIndex: slot.subgameIndex ?? 0
+            },
+            { $set: setFields }
+        );
+    }
+
+    async deleteGamePlayerSlot(gameId, slot) {
+        const oid = this._id(gameId);
+        await this.gamePlayersCollection().deleteOne({
+            gameId: oid,
+            id: slot.id,
+            extraPlayer: slot.extraPlayer ?? 0,
+            subgameIndex: slot.subgameIndex ?? 0
+        });
+    }
+
+    async kickUserFromAllGameSlots(gameId, userId) {
+        const oid = this._id(gameId);
+        await this.gamePlayersCollection().updateMany(
+            { gameId: oid, id: userId },
+            { $set: { status: 'kicked' } }
+        );
+    }
+
     // Game operations
     async createGame(gameData) {
-        const result = await this.gamesCollection().insertOne(gameData);
+        const doc = { ...gameData };
+        delete doc.players;
+        const result = await this.gamesCollection().insertOne(doc);
+        gameData._id = result.insertedId;
+        this.invalidateGameCache(result.insertedId);
         return result.insertedId;
     }
 
-    // async getGame(gameId, direct = false) {
-    //     const fn = () => this.gamesCollection().findOne({ _id: this._id(gameId) });
-    //     if (!direct) return await fn();
-
-    //     const cacheKey = `Game:${gameId}`;
-    //     return await this.cache.getOrSet(
-    //         cacheKey,
-    //         fn,
-    //         this.ttlGameDataMs
-    //     );
-    // }
     async getGame(gameId) {
-        return await this.gamesCollection().findOne({ _id: this._id(gameId) });
+        const oid = this._id(gameId);
+        const cacheKey = this.getGameCacheKey(oid);
+        return await this.cache.getOrSet(
+            cacheKey,
+            async () => {
+                return await this.gamesCollection().findOne({ _id: oid });
+            },
+            this.ttlGameDataMs
+        );
+    }
+
+    async getGameWithPlayers(gameId) {
+        const game = await this.getGame(gameId);
+        if (!game) return null;
+        game.players = await this.getGamePlayers(game._id);
+        return game;
     }
 
     async updateGame(gameId, updateData) {
-        updateData.updatedDate = new Date();
+        const payload = { ...updateData };
+        delete payload.players;
+        payload.updatedDate = new Date();
         const result = await this.gamesCollection().updateOne(
             { _id: this._id(gameId)},
-            { $set: updateData }
+            { $set: payload }
         );
-        // if (result.modifiedCount) {
-        //     // refresh cache with actual data of game
-        //     await this.getGame(gameId, true);
-        // }
+        this.invalidateGameCache(gameId);
         return result;
     }
 
     async deactivateGame(gameId) {
-        return await this.gamesCollection().updateOne(
+        const result = await this.gamesCollection().updateOne(
             { _id: this._id(gameId) },
-            { $set: { isActive: false } }
+            { $set: { /*isActive: false*/ status: GameStatus.DELETED } }
         );
+        this.invalidateGameCache(gameId);
+        return result;
     }
 
     async deactivateExpiredGames() {
         const now = new Date();
         const startOfDate = now.startOfDay();
-        //console.log(now, 'Deactivation...');
+        // console.log(now, 'Deactivation...');
 
         const filter = {
-            isActive: true,
+            //isActive: true,
+            status: GameStatus.ACTIVE,
             $or: [
                 // 1. Якщо є хоча б одна підгра з датою (дата гри у такому випадку не має значення), і ВСІ такі дати вже в минулому
                 {
@@ -182,13 +300,14 @@ class Database {
         let result;
 
         if (gamesToDeactivate.length > 0) {
-            result = await this.gamesCollection().updateMany(filter, { $set: { isActive: false } });
+            result = await this.gamesCollection().updateMany(filter, { $set: { /*isActive: false*/status: GameStatus.EXPIRED } });
             if (result.modifiedCount) {
                 console.log(`Deactivated ${result.modifiedCount} games:`);
 
                 for (const game of gamesToDeactivate) {
                     try {
-                        game.isActive = false;
+                        //game.isActive = false;
+                        game.status = GameStatus.EXPIRED;
                         const gameId = game._id.toHexString();
                         console.log(`    id=${gameId}, ${game.name}`);
                         if (this.bot?.updateGameMessage) {
@@ -206,7 +325,8 @@ class Database {
 
     async getGamesForNotification(dateStart, dateEnd, onlyIfDateWithTime = false) {
         const filter = {
-            isActive: true,
+            //isActive: true,
+            status: GameStatus.ACTIVE,
             date: { $gte: dateStart, $lte: dateEnd },
             ...(onlyIfDateWithTime && { isDateWithoutTime: false })
         };
@@ -250,7 +370,7 @@ class Database {
     async getActiveGamesWithChatSettings(filter) {
         return await this.gamesCollection().aggregate([
             {
-                $match: { ...filter, isActive: true }
+                $match: { ...filter, /*isActive: true*/status: GameStatus.ACTIVE }
             },
             // 1. Приєднуємо налаштування чату
             {
@@ -275,13 +395,37 @@ class Database {
                                     $and: [
                                         // Порівнюємо gameId (якщо він у вас збережений як рядок, додайте конвертацію)
                                         { $eq: ['$gameId', '$$game_id'] },
-                                        { $eq: ['$isActive', true] }
+                                        { $eq: [/*'$isActive', true*/'$status', GameStatus.ACTIVE] }
                                     ]
                                 }
                             }
                         }
                     ],
                     as: 'notifications'
+                }
+            },
+
+            {
+                $lookup: {
+                    from: 'gamePlayers',
+                    let: { gid: '$_id' },
+                    pipeline: [
+                        { $match: { $expr: { $eq: ['$gameId', '$$gid'] } } },
+                        { $sort: { timestamp: 1 } },
+                        {
+                            $project: {
+                                _id: 0,
+                                id: 1,
+                                name: 1,
+                                fullName: 1,
+                                extraPlayer: 1,
+                                status: 1,
+                                timestamp: 1,
+                                subgameIndex: 1
+                            }
+                        }
+                    ],
+                    as: 'playersFromColl'
                 }
             },
 
@@ -296,12 +440,11 @@ class Database {
                     chatName: 1,
                     messageId: 1,
                     maxPlayers: 1,
-                    players: 1,
+                    players: { $ifNull: ['$playersFromColl', []] },
                     subgames: 1,
                     timezone: '$chatSettings.settings.timezone',
                     notificationTerms: '$chatSettings.settings.notificationTerms',
                     license: '$chatSettings.license',
-                    // Додаємо нове поле
                     notifications: 1
                 }
             }
@@ -409,6 +552,7 @@ class Database {
             { $set: fields},
             { upsert: true }
         );
+        this.cache.delete('globalSettings');
         return result;
     }
 
@@ -433,7 +577,7 @@ class Database {
                     $set: {
                         isActive: {
                             $cond: {
-                                if: { $eq: ["$isActive", true] },
+                                if: { $eq: [/*'$isActive', true*/'$status', GameStatus.ACTIVE] },
                                 then: false,
                                 else: true
                             }
@@ -450,4 +594,4 @@ class Database {
     }
 }
 
-module.exports = Database;
+module.exports = { Database, GameStatus };

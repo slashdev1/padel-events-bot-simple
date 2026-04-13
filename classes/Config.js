@@ -113,6 +113,10 @@ class Config {
         return process.env.CACHE_TTL_LICENSES_MS;
     }
 
+    get cacheTtlGameData() {
+        return process.env.CACHE_TTL_GAME_DATA_MS;
+    }
+
     get timezoneClientDefault() {
         return process.env.TIMEZONE_CLIENT_DEFAULT;
     }

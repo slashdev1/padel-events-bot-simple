@@ -25,6 +25,7 @@ const {
     formatToTimeZone
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
+const { GameStatus } = require('./Database');
 
 class Bot {
     constructor(config, database, webServer) {
@@ -241,7 +242,7 @@ class Bot {
             createdDate: new Date(),
             createdById: creatorId,
             createdByName: creatorName,
-            isActive: true,
+            status: GameStatus.ACTIVE,
             chatId,
             chatName,
             name,
@@ -257,7 +258,7 @@ class Bot {
 
         const gameId = await this.database.createGame(game);
         const message = await this.writeGameMessage(ctx, game);
-        await this.database.updateGame(gameId, { messageId: message.message_id });
+        /*await */this.database.updateGame(gameId, { messageId: message.message_id });
 
         const replyText = `Ви щойно створили гру "${game.name}" (id=${gameId}).` + (game.isDateWithoutTime ? '\n\n' + this.emoji.warn + 'Для того щоб коректно нагадувати та деактивовувати ігри краще зазначати дату ігри разом з часом.' : '');
         this.replyToUserDirectOrDoNothing(ctx, replyText);
@@ -271,20 +272,20 @@ class Bot {
         if (args.length < 1) return this.replyWarning(ctx, cmdName, 'Не переданий ідентифікатор гри.');
 
         const gameId = args[0];
-        const game = await this.database.getGame(gameId);
+        const game = await this.database.getGameWithPlayers(gameId);
         if (!game) return;
 
         const chatId = game.chatId;
         if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName)) return;
 
-        if (game.isActive) await this.database.deactivateGame(gameId);
+        if (game.status !== GameStatus.DELETED) await this.database.deactivateGame(gameId);
         try {
             await this.bot.telegram.deleteMessage(game.chatId, game.messageId);
         } catch (error) {
             console.error(error); // TelegramError: 400: Bad Request: message to edit not found
             //await this.replyToUser(ctx, `Сталася помилка при спробі видалення повідомлення з грою: ${error?.code} - ${error?.description}`);
             try {
-                game.isActive = false;
+                game.status = GameStatus.DELETED;
                 await this.updateGameMessage(game);
             } catch (error) {}
         }
@@ -300,7 +301,7 @@ class Bot {
         if (args.length < 2) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
 
         const gameId = args.shift();
-        const game = await this.database.getGame(gameId);
+        const game = await this.database.getGameWithPlayers(gameId);
         if (!game) return;
 
         const chatId = game.chatId;
@@ -342,12 +343,12 @@ class Bot {
                 game.date = updateData.date;
                 game.isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
             } else if (key === 'active') {
-                updateData.isActive = isTrue(supportedParams[key]);
-                game.isActive = updateData.isActive;
+                updateData.status = isTrue(supportedParams[key]) ? GameStatus.ACTIVE : GameStatus.INACTIVE;
+                game.status = updateData.status;
             }
         }
         await this.database.updateGame(gameId, updateData);
-        await this.updateGameMessage(game);
+        /*await*/ this.updateGameMessage(game);
 
         const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
         this.replyToUserDirectOrDoNothing(ctx, replyText);
@@ -361,7 +362,7 @@ class Bot {
         if (args.length < 2) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
 
         const gameId = args.shift();
-        const game = await this.database.getGame(gameId);
+        const game = await this.database.getGameWithPlayers(gameId);
         if (!game) return;
 
         const chatId = game.chatId;
@@ -374,17 +375,17 @@ class Bot {
         const setIds = new Set();
         filtered.forEach(p => setIds.add(p.id));
         if (setIds.size > 1) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + `Знайдено різних ігроків за запитом "${player}" у грі "${game.name}". Уточніть дані ігрока.`);
-        filtered.forEach((p) => p.status = 'kicked');
-        await this.database.updateGame(game._id, { players: game.players });
+        await this.database.kickUserFromAllGameSlots(game._id, filtered[0].id);
+        game.players = await this.database.getGamePlayers(game._id);
 
-        await this.updateGameMessage(game);
+        /*await*/ this.updateGameMessage(game);
         return this.replyToUserDirectOrDoNothing(ctx, `Ігрока "${player}" виключено з гри "${game.name}".`);
     }
 
     async handleActiveGames(ctx) {
         const chatId = this.getChatId(ctx);
         const userId = this.getUserId(ctx);
-        const filter = { isActive: true };
+        const filter = { /*isActive: true*/status: GameStatus.ACTIVE };
         let where = '';
         let showStatusless = false;
         if (this.isGroup(chatId)) {
@@ -585,66 +586,15 @@ class Bot {
         return this.findBlockingOtherSubgameSignup(game, chatSettings, userId, +subgameIndexStr, newStatus)?.message ?? null;
     }
 
-    async updateGameStatus_old(ctx, action) {
-        const [fullGameId, extraAction] = ctx.match[1].split('_');
-        const [gameId, subgameIndex] = fullGameId.split('/');
-        const userId = this.getUserId(ctx);
-        const username = extractUserTitle(ctx.from);
-        const fullName = extractUserTitle(ctx.from, false);
-        const timestamp = new Date();
-
-        const game = await this.database.getGame(gameId);
-        if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
-        if (!game.isActive) return this.showPopup(ctx, this.emoji.warn + 'Гра неактивна.');
-
-        const chatSettings = await this.database.getChatSettings(game.chatId);
-        if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member')) return console.error(`Важливо (updateGameStatus_old): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
-
-        const newStatus = getStatusByAction(action);
-        let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
-        if (playerInd >= 0 && game.players[playerInd].status === 'kicked') {
-            // return this.replyToUser(ctx, "Ви не можете змінити статус, бо вас виключено з гри.");
-            return this.showPopup(ctx, this.emoji.kick + 'Вас виключено з гри.');
+    /** Найбільший номер додаткового гравця (+1) для цього користувача в межах підігри. */
+    maxExtraPlayerForUser(game, userId, subgameIndex) {
+        let max = 0;
+        for (const p of game.players || []) {
+            if (p.id !== userId || !p.extraPlayer) continue;
+            if (!(!subgameIndex || p.subgameIndex === +subgameIndex)) continue;
+            max = Math.max(max, p.extraPlayer);
         }
-        if (extraAction && (playerInd == -1 || game.players[playerInd].status !== 'joined')) {
-            // return this.replyToUser(ctx, 'Перед тим як додавати/видаляти ігрока натисніть що Ви самі йдете на гру.');
-            return this.showPopup(ctx, this.emoji.warn + 'Спершу натисніть що ви самі йдете на гру.');
-        }
-        let extraPlayer = game.players.length && Math.max(...game.players.map(p => p.id === userId && p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex))) || 0;
-        if (extraAction) {
-            if (extraAction === 'minus') {
-                if (extraPlayer <= 0) {
-                    return this.showPopup(ctx, this.emoji.warn + 'Немає додаткових ігроків, яких ви залучили.');
-                }
-                playerInd = game.players.findIndex(p => p.id === userId && p.extraPlayer === extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
-                game.players.splice(playerInd, 1);
-            } else
-                extraPlayer++;
-        } else {
-            if (playerInd >= 0) {
-                if (game.players[playerInd].status === newStatus) {
-                    return;
-                }
-                if (extraPlayer > 0) {
-                    return this.showPopup(ctx, this.emoji.warn + 'Перед тим як змінювати свій статус видмініть похід на гру для додаткових ігроків, яких ви залучили.');
-                } else if (newStatus === 'joined' && subgameIndex) {
-                    const playersItem = game.players.find(p => p.id === userId && !p.extraPlayer && p.subgameIndex !== +subgameIndex && p.status === newStatus);
-                    if (playersItem) return this.showPopup(ctx, this.emoji.warn + 'Ви вже йдете на гру ' + game.subgames[playersItem.subgameIndex]?.name + '.');
-                }
-                game.players.splice(playerInd, 1);
-            } else if (newStatus === 'joined' && subgameIndex) {
-                const playersItem = game.players.find(p => p.id === userId && !p.extraPlayer && p.subgameIndex !== +subgameIndex && p.status === newStatus);
-                if (playersItem) return this.showPopup(ctx, this.emoji.warn + 'Ви вже йдете на гру ' + game.subgames[playersItem.subgameIndex]?.name + '.');
-            }
-        }
-
-        if (extraAction !== 'minus')
-            game.players.push({ id: userId, name: username, fullName: fullName, extraPlayer, status: newStatus, timestamp, subgameIndex: parseInt(subgameIndex) || 0 });
-        game.players.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-        await this.database.updateGame(game._id, { players: game.players });
-
-        this.updateGameMessage(game);
-        this.showPopup(ctx, '');
+        return max;
     }
 
     async updateGameStatus(ctx, action) {
@@ -655,14 +605,16 @@ class Bot {
         const fullName = extractUserTitle(ctx.from, false);
         const timestamp = new Date();
 
-        const game = await this.database.getGame(gameId);
+        const game = await this.database.getGameWithPlayers(gameId);
         if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
-        if (!game.isActive) return this.showPopup(ctx, this.emoji.warn + 'Гра неактивна.');
+        if (/*!game.isActive*/game.status !== GameStatus.ACTIVE) return this.showPopup(ctx, this.emoji.warn + 'Гра неактивна.');
 
         const chatSettings = await this.database.getChatSettings(game.chatId);
         if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member')) return console.error(`Важливо (updateGameStatus): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
 
         const newStatus = getStatusByAction(action);
+        const subgameIndexNum = parseInt(subgameIndex, 10) || 0;
+        const gid = game._id;
         let playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
         if (playerInd >= 0 && game.players[playerInd].status === 'kicked') {
             return this.showPopup(ctx, this.emoji.kick + 'Вас виключено з гри.');
@@ -672,16 +624,37 @@ class Bot {
                 return this.showPopup(ctx, this.emoji.warn + 'Спершу натисніть що ви самі йдете на гру.');
             }
         }
-        let extraPlayer = game.players.length && Math.max(...game.players.map(p => p.id === userId && p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex))) || 0;
+        let extraPlayer = this.maxExtraPlayerForUser(game, userId, subgameIndex);
         if (extraAction) {
             if (extraAction === 'minus') {
                 if (extraPlayer <= 0) {
                     return this.showPopup(ctx, this.emoji.warn + 'Немає додаткових ігроків, яких ви залучили.');
                 }
                 playerInd = game.players.findIndex(p => p.id === userId && p.extraPlayer === extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
-                game.players.splice(playerInd, 1);
-            } else
+                if (playerInd < 0) {
+                    return this.showPopup(ctx, this.emoji.warn + 'Запис не знайдено.');
+                }
+                await this.database.deleteGamePlayerSlot(gid, game.players[playerInd]);
+            } else {
                 extraPlayer++;
+                const inserted = await this.database.insertGamePlayer(gid, {
+                    id: userId,
+                    name: username,
+                    fullName: fullName,
+                    extraPlayer,
+                    status: newStatus,
+                    timestamp,
+                    subgameIndex: subgameIndexNum
+                });
+                if (!inserted.ok) {
+                    if (inserted.duplicate) {
+                        game.players = await this.database.getGamePlayers(gid);
+                        this.updateGameMessage(game);
+                        return this.showPopup(ctx, '');
+                    }
+                    return this.showPopup(ctx, this.emoji.err + 'Не вдалося додати ігрока.');
+                }
+            }
         } else {
             if (playerInd >= 0) {
                 if (game.players[playerInd].status === newStatus) {
@@ -693,17 +666,39 @@ class Bot {
                     const conflict = this.checkSubgameSignupConflict(game, chatSettings, userId, subgameIndex, newStatus);
                     if (conflict) return this.showPopup(ctx, conflict);
                 }
-                game.players.splice(playerInd, 1);
+                const slot = game.players[playerInd];
+                await this.database.updateGamePlayerSlot(gid, slot, {
+                    status: newStatus,
+                    timestamp,
+                    name: username,
+                    fullName: fullName
+                });
             } else {
                 const conflict = this.checkSubgameSignupConflict(game, chatSettings, userId, subgameIndex, newStatus);
                 if (conflict) return this.showPopup(ctx, conflict);
+                const inserted = await this.database.insertGamePlayer(gid, {
+                    id: userId,
+                    name: username,
+                    fullName: fullName,
+                    extraPlayer: 0,
+                    status: newStatus,
+                    timestamp,
+                    subgameIndex: subgameIndexNum
+                });
+                if (!inserted.ok && inserted.duplicate) {
+                    game.players = await this.database.getGamePlayers(gid);
+                    playerInd = game.players.findIndex(p => p.id === userId && !p.extraPlayer && (!subgameIndex || p.subgameIndex === +subgameIndex));
+                    if (playerInd >= 0 && game.players[playerInd].status === newStatus) {
+                        this.updateGameMessage(game);
+                        return this.showPopup(ctx, '');
+                    }
+                    return this.showPopup(ctx, this.emoji.warn + 'Ваш запис уже оновлено. Оновіть повідомлення гри.');
+                }
+                if (!inserted.ok) return this.showPopup(ctx, this.emoji.err + 'Не вдалося записати на гру.');
             }
         }
 
-        if (extraAction !== 'minus')
-            game.players.push({ id: userId, name: username, fullName: fullName, extraPlayer, status: newStatus, timestamp, subgameIndex: parseInt(subgameIndex) || 0 });
-        game.players.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-        await this.database.updateGame(game._id, { players: game.players });
+        game.players = await this.database.getGamePlayers(gid);
 
         this.updateGameMessage(game);
         this.showPopup(ctx, '');
@@ -713,43 +708,46 @@ class Bot {
         const cmdName = 'change_game';
         const gameId = ctx.match[1].split('_')[0];
 
-        const game = await this.database.getGame(gameId);
+        const game = await this.database.getGameWithPlayers(gameId);
         if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
+        if (game.status === GameStatus.EXPIRED) return this.showPopup(ctx, this.emoji.warn + 'Гру закінчено вже.');
 
         const chatId = game.chatId;
         const chatSettings = await this.database.getChatSettings(chatId) || {};
         if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
 
         const updateData = {};
-        updateData.isActive = !game.isActive;
-        game.isActive = updateData.isActive;
+        // updateData.isActive = !game.isActive;
+        // game.isActive = updateData.isActive;
+        updateData.status = game.status === GameStatus.ACTIVE ? GameStatus.INACTIVE : GameStatus.ACTIVE;
+        game.status = updateData.status;
 
         await this.database.updateGame(gameId, updateData);
         await this.updateGameMessage(game);
 
         //const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
         //this.replyToUserDirectOrDoNothing(ctx, replyText);
-        this.showPopup(ctx, this.emoji.info + 'Гру ' + (game.isActive ? 'відкрито.' : 'закрито.'));
+        this.showPopup(ctx, this.emoji.info + 'Гру ' + (/*game.isActive*/game.status === GameStatus.ACTIVE ? 'відкрито.' : 'закрито.'));
     }
 
     async handleGameSetup(ctx) {
         const cmdName = 'change_game';
         const gameId = ctx.match[1].split('_')[0];
 
-        const game = await this.database.getGame(gameId);
+        const game = await this.database.getGameWithPlayers(gameId);
         if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
 
         const chatId = game.chatId;
         const chatSettings = await this.database.getChatSettings(chatId) || {};
         if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
 
-        this.showPopup(ctx, 'Даний функціонал у розробці. Слідкуйте за оновленнями.');
+        this.showPopup(ctx, this.emoji.info + ' Даний функціонал у розробці. Слідкуйте за оновленнями.');
     }
 
     async handleGameNotification(ctx) {
         const gameId = ctx.match[1].split('_')[0];
 
-        const game = await this.database.getGame(gameId);
+        const game = await this.database.getGameWithPlayers(gameId);
         if (!game) return this.showPopup(ctx, this.emoji.notfound + ' Гру не знайдено.');
 
         let gameDate = game.date;
@@ -812,26 +810,30 @@ class Bot {
             `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
             `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n\n`;
         }
+        let topText = ''
+        if (game.status === GameStatus.INACTIVE) topText = '‼️ ГРА НЕАКТИВНА ‼️\n\n';
+        else if (game.status === GameStatus.EXPIRED) topText = '‼️ ГРА ЗАКІНЧИЛАСЬ ‼️\n\n';
+        else if (game.status === GameStatus.DELETED) topText = '‼️ ГРА ВИДАЛЕНА ‼️\n\n';
         return textMarkdownNormalize(
-            (!game.isActive ? '‼️ НЕАКТИВНА ‼️\n\n' : '') +
+            topText +
             `📅 ${game.name}${dateText}\n\n` + gameText +
             `✍️ Опубліковано ${game.createdByName}`
         );
     }
 
     buildMarkup(game) {
-        if (!game) return null;
+        if (!game || ![GameStatus.ACTIVE, GameStatus.INACTIVE].includes(game.status)) return null;
 
         const gameId = game._id.toHexString();
         const buttons = [];
         buttons.push([
-            Markup.button.callback(game.isActive ? '⏸️ Закрити' : '▶️ Відкрити гру', `activation_${gameId}`),
-            ...(game.isActive ? [
+            Markup.button.callback(/*game.isActive*/game.status === GameStatus.ACTIVE ? '⏸️ Закрити' : '▶️ Відкрити гру', `activation_${gameId}`),
+            ...(/*game.isActive*/game.status === GameStatus.ACTIVE ? [
                 Markup.button.callback(this.emoji.bell + 'За 1 год.', `notification_${gameId}`),
                 Markup.button.callback('⚙️', `setup_${gameId}`)
             ] : []),
         ]);
-        if (!game.isActive) return Markup.inlineKeyboard(buttons);
+        if (/*!game.isActive*/game.status !== GameStatus.ACTIVE) return Markup.inlineKeyboard(buttons);
 
         if (!game.subgames || game.subgames.length <= 1) {
             buttons.push([
@@ -894,6 +896,10 @@ class Bot {
                 this.getGameMessageOptions(game)
             );
         } catch (error) {
+            const desc = error?.response?.description || error?.description || '';
+            if (error?.response?.error_code === 400 && desc.includes('message is not modified')) {
+                return;
+            }
             console.error(error);
         }
     }

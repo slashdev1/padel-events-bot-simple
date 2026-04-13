@@ -1,5 +1,5 @@
 const Config = require('./classes/Config');
-const Database = require('./classes/Database');
+const { Database } = require('./classes/Database');
 const WebServer = require('./classes/WebServer');
 const Bot = require('./classes/Bot');
 const Scheduler = require('./classes/Scheduler');
@@ -50,7 +50,8 @@ class PadelBotApp {
             const data = this.bot.botInfo;
             this.bot.setBotInfo(data.username, `https://t.me/${data.username}`);
             console.log(data.username, `https://t.me/${data.username}`);
-            this.database.deactivateExpiredGames();
+
+            // this.database.deactivateExpiredGames();
         };
 
         let config = this.config.botConfig;
