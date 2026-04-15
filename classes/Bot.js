@@ -1077,9 +1077,9 @@ class Bot {
         return responses; // Повертаємо масив відповідей від API
     }
 
-    showPopup(ctx, msg) {
+    showPopup(ctx, msg, isAlert = false) {
         ctx.answerCbQuery(msg, {
-            show_alert: msg.length > 50
+            show_alert: msg.length > 50 || !!isAlert
         });
     }
 

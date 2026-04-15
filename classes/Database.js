@@ -288,21 +288,27 @@ class Database {
                 }
             ]
         };
-        //console.log(now, filter);
 
-        // const result = await this.gamesCollection().updateMany(filter, { $set: { isActive: false } });
-        // if (result.modifiedCount) {
-        //     console.log(`Deactivated ${result.modifiedCount} games`);
-        // }
         const gamesToDeactivate = await this.gamesCollection()
             .find(filter)
             .toArray();
-        let result;
 
         if (gamesToDeactivate.length > 0) {
-            result = await this.gamesCollection().updateMany(filter, { $set: { /*isActive: false*/status: GameStatus.EXPIRED } });
+            const result = await this.gamesCollection().updateMany(filter, { $set: { /*isActive: false*/status: GameStatus.EXPIRED } });
             if (result.modifiedCount) {
                 console.log(`Deactivated ${result.modifiedCount} games:`);
+
+                const gameIds = gamesToDeactivate.map(g => g._id);
+                const players = await this.gamePlayersCollection()
+                    .find({ gameId: { $in: gameIds } })
+                    .sort({ timestamp: 1 })
+                    .toArray();
+                const playersByGame = players.reduce((acc, p) => {
+                    const gid = p.gameId.toHexString();
+                    if (!acc[gid]) acc[gid] = [];
+                    acc[gid].push(this._publicGamePlayer(p));
+                    return acc;
+                }, {});
 
                 for (const game of gamesToDeactivate) {
                     try {
@@ -310,6 +316,7 @@ class Database {
                         game.status = GameStatus.EXPIRED;
                         const gameId = game._id.toHexString();
                         console.log(`    id=${gameId}, ${game.name}`);
+                        game.players = playersByGame[gameId] || [];
                         if (this.bot?.updateGameMessage) {
                             await this.bot.updateGameMessage(game, gameId);
                         }
@@ -318,9 +325,7 @@ class Database {
                     }
                 }
             }
-        } else
-            result = true;
-        return result;
+        }
     }
 
     async getGamesForNotification(dateStart, dateEnd, onlyIfDateWithTime = false) {
