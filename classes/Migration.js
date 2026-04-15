@@ -103,23 +103,23 @@ class Migration {
     async migrateGameFieldIsActive() {
         try {
             const result = await this.database.gamesCollection().updateMany(
-            {}, // Знаходимо всі документи
-            [
-                {
-                    $set: {
-                        status: {
-                            $cond: {
-                                if: { $eq: ["$isActive", true] },
-                                then: "active",
-                                else: "expired"
+                {}, // Знаходимо всі документи
+                [
+                    {
+                        $set: {
+                            status: {
+                                $cond: {
+                                    if: { $eq: ["$isActive", true] },
+                                    then: "active",
+                                    else: "expired"
+                                }
                             }
                         }
+                    },
+                    {
+                        $unset: "isActive" // Видаляємо старе поле
                     }
-                },
-                {
-                    $unset: "isActive" // Видаляємо старе поле
-                }
-            ]
+                ]
             );
 
             console.log(`Оновлено документів: ${result.modifiedCount}`);

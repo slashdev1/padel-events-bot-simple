@@ -184,6 +184,7 @@ class Database {
     async createGame(gameData) {
         const doc = { ...gameData };
         delete doc.players;
+        doc.createdDate = new Date;
         const result = await this.gamesCollection().insertOne(doc);
         gameData._id = result.insertedId;
         this.invalidateGameCache(result.insertedId);
@@ -289,10 +290,7 @@ class Database {
             ]
         };
 
-        const gamesToDeactivate = await this.gamesCollection()
-            .find(filter)
-            .toArray();
-
+        const gamesToDeactivate = await this.findGames(filter);
         if (gamesToDeactivate.length > 0) {
             const result = await this.gamesCollection().updateMany(filter, { $set: { /*isActive: false*/status: GameStatus.EXPIRED } });
             if (result.modifiedCount) {
@@ -328,50 +326,56 @@ class Database {
         }
     }
 
-    async getGamesForNotification(dateStart, dateEnd, onlyIfDateWithTime = false) {
-        const filter = {
-            //isActive: true,
-            status: GameStatus.ACTIVE,
-            date: { $gte: dateStart, $lte: dateEnd },
-            ...(onlyIfDateWithTime && { isDateWithoutTime: false })
-        };
-        return await this.gamesCollection().find(filter).toArray();
+    // async getGamesForNotification(dateStart, dateEnd, onlyIfDateWithTime = false) {
+    //     const filter = {
+    //         //isActive: true,
+    //         status: GameStatus.ACTIVE,
+    //         date: { $gte: dateStart, $lte: dateEnd },
+    //         ...(onlyIfDateWithTime && { isDateWithoutTime: false })
+    //     };
+    //     return await this.findGames(filter);
+    // }
+
+    // async findGames(filter) {
+    //     return await this.gamesCollection().find(filter).toArray();
+    // }
+
+    async findGames(filter) {
+        return await this.gamesCollection().aggregate([
+            {
+                $match: filter
+            },
+            {
+                $lookup: {
+                    from: 'chatSettings',
+                    localField: 'chatId',
+                    foreignField: 'chatId',
+                    as: 'chatSettings'
+                }
+            },
+            { $unwind: { path: '$chatSettings', preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 1,
+                    name: 1,
+                    date: 1,
+                    isDateWithoutTime: 1,
+                    chatId: 1,
+                    chatName: 1,
+                    messageId: 1,
+                    maxPlayers: 1,
+                    status: 1,
+                    createdDate: 1,
+                    createdByName: 1,
+                    subgames: 1,
+                    timezone: '$chatSettings.timezone',
+                    notificationTerms: '$chatSettings.notificationTerms',
+                    license: '$chatSettings.license'
+                }
+            }
+        ]).toArray();
     }
 
-    // async getActiveGamesWithChatSettings(filter) {
-    //     return await this.gamesCollection().aggregate([
-    //         {
-    //             $match: { ...filter, isActive: true }
-    //         },
-    //         {
-    //             $lookup: {
-    //                 from: 'chatSettings',
-    //                 localField: 'chatId',
-    //                 foreignField: 'chatId',
-    //                 as: 'chatSettings'
-    //             }
-    //         },
-    //         { $unwind: { path: '$chatSettings', preserveNullAndEmptyArrays: true } },
-    //         {
-    //             $project: {
-    //                 _id: 1,
-    //                 name: 1,
-    //                 date: 1,
-    //                 isDateWithoutTime: 1,
-    //                 chatId: 1,
-    //                 chatName: 1,
-    //                 messageId: 1,
-    //                 maxPlayers: 1,
-    //                 players: 1,
-    //                 subgames: 1,
-    //                 //sentReminders: 1,
-    //                 timezone: '$chatSettings.timezone',
-    //                 notificationTerms: '$chatSettings.notificationTerms',
-    //                 license: '$chatSettings.license'
-    //             }
-    //         }
-    //     ]).toArray();
-    // }
     async getActiveGamesWithChatSettings(filter) {
         return await this.gamesCollection().aggregate([
             {

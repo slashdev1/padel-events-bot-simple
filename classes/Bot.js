@@ -60,6 +60,7 @@ class Bot {
         this.bot.command('__send_to', this.handleSendTo.bind(this));
         this.bot.command('__adm', this.handleGetAdm.bind(this));
         this.bot.command('__del_msg', this.handleDeleteMessage.bind(this));
+        this.bot.command('__refresh_game_msg', this.handleRefreshGameMessage.bind(this));
     }
 
     setupActions() {
@@ -239,7 +240,6 @@ class Bot {
         const chatName = ctx.chat.title;
 
         const game = {
-            createdDate: new Date(),
             createdById: creatorId,
             createdByName: creatorName,
             status: GameStatus.ACTIVE,
@@ -484,6 +484,63 @@ class Bot {
         }
         await this.database.updateUser({ ...ctx.from, settings: keyValueObj }, true);
         await this.sendMessage(userId, this.emoji.info + `Налаштування ${key} оновлене.`);
+    }
+
+    async handleRefreshGameMessage(ctx) {
+        let [_, ...args] = parseArgs(ctx.message.text);
+        if (args.length != 1) return await this.sendMessage(userId, this.emoji.warn + 'Передана некоректа кількість параметрів.');
+
+        const str = args[0];
+        const isHex = /^[0-9a-fA-F]+$/.test(str);
+        const filter = {};
+        if (isHex) {
+            const partialId = str + '$';
+            filter.$expr = {
+                $regexMatch: {
+                    input: { $toString: "$_id" },
+                    regex: partialId, // Можна додати '^' на початку, якщо шукаєте лише з старту
+                    options: "i"
+                }
+            }
+        } else {
+            filter.name = { $regex: str, $options: "i" };
+        }
+        const games = await this.database.findGames(filter);
+        const gamesCount = games.length;
+        if (!gamesCount) return this.replyOrDoNothing(ctx, this.emoji.warn + ' Жодної гри не знайдено.');
+
+        if (gamesCount > 1) {
+            const showCount = 10;
+            const text = games
+                .sort((a, b) => {
+                    const timeA = a.createdDate ? new Date(a.createdDate).getTime() : 0;
+                    const timeB = b.createdDate ? new Date(b.createdDate).getTime() : 0;
+                    return timeB - timeA; // Від нових до старих
+                })
+                .slice(0, showCount)
+                .map(game => {
+                    let gameDate = game.date;
+                    let subgame = (game.subgames || []).find(item => item.date instanceof Date && !isNaN(item.date));
+                    if (subgame) {
+                        gameDate = subgame.date;
+                    }
+
+                    let timezone = game.timezone || this.getDefaultSettings().timezone;
+                    let dateText = '-';
+                    if (gameDate) {
+                        dateText = formatToTimeZone(gameDate, timezone);
+                        if (game.isDateWithoutTime) dateText = dateText.split(' ')[0];
+                    }
+                    return `📅 ${dateText}, ${game.name} у групі ${game.chatName || '-'} (id=${game._id})`;})
+                .join('\n' + '—'.repeat(18) + '\n');
+            return this.replyOrDoNothing(ctx, this.emoji.warn + ' Знайдено ' + gamesCount + ' ігор.' + (gamesCount > showCount ? '\nВиведено останні 10:' : '') + '\n\n' + text);
+        }
+
+        const game = games[0];
+        const gameId = game._id.toHexString();
+        game.players = await this.database.getGamePlayers(gameId);
+        this.updateGameMessage(game, gameId);
+        return this.replyOrDoNothing(ctx, this.emoji.info + ' Оновлено повідомлення для гри ' + game.name + '.');
     }
 
     subgameDateMs(subgame) {
