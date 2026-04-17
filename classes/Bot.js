@@ -1,8 +1,6 @@
 const { Telegraf, Markup } = require('telegraf');
 const {
     str2params,
-    // date2int,
-    // date2text,
     parseDate,
     getStatusByAction,
     textMarkdownNormalize,
@@ -22,7 +20,8 @@ const {
     parseDateWithTimezone,
     getDigitGroupCount,
     sleep,
-    formatToTimeZone
+    formatToTimeZone,
+    isDate
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
 const { GameStatus } = require('./Database');
@@ -43,7 +42,11 @@ class Bot {
         this.setupActions();
         this.setupMyChatMember();
         this.setupChatMembers();
+        this.setupTextHandler();
     }
+
+    // Для кнопок з вводом тексту
+    waitingInput = {}; // { userId: { type, gameId } }
 
     setupCommands() {
         this.bot.command('start', this.handleStart.bind(this));
@@ -71,6 +74,12 @@ class Bot {
         this.bot.action(/^notification_(.*)$/, (ctx) => this.handleGameNotification(ctx));
         this.bot.action(/^setup_(.*)$/, (ctx) => this.handleGameSetup(ctx));
         this.bot.action(/^none$/, (ctx) => this.showPopup(ctx, this.emoji.warn + 'Натискайте на кнопки нище.'));
+
+        this.bot.action(/^activate_(.*)$/, (ctx) => this.handleGameOpening(ctx));
+        this.bot.action(/^disactivate_(.*)$/, (ctx) => this.handleGameClosing(ctx));
+        this.bot.action(/^editMaxPlayers_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'players'));
+        this.bot.action(/^editDate_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'date'));
+        this.bot.action(/^editName_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'name'));
     }
 
     setupMyChatMember() {
@@ -140,6 +149,27 @@ class Bot {
             console.log(`Користувач пішов: ${name} (ID: ${user.id})`);
 
             //ctx.reply(`${name} покинув чат. До зустрічі! 😢`);
+        });
+    }
+
+    setupTextHandler() {
+        this.bot.on('text', async (ctx) => {
+            console.log(`Повідомлення від ${extractUserTitle(ctx.from)} (id=${this.getUserId(ctx)}): ` + ctx.message.text);
+
+            const input = this.waitingInput[ctx.from.id];
+            if (!input) return;
+
+            const { type, gameId } = input;
+            const game = await this.database.getGameWithPlayers(gameId);
+            if (!game) return;
+
+            let update = { [type]: ctx.message.text };
+            delete(this.waitingInput[ctx.from.id]);
+
+            const result = await this._changeGame(ctx, game, update);
+            if (result !== true) return;
+
+            ctx.reply(this.emoji.info + 'Гру змінено.');
         });
     }
 
@@ -246,7 +276,7 @@ class Bot {
             chatId,
             chatName,
             name,
-            date: subgames && subgames.some(item => item.date instanceof Date && !isNaN(item.date)) ? null : date,
+            date: subgames && subgames.some(item => isDate(item.date)) ? null : date,
             isDateWithoutTime,
             maxPlayers,
             players: [],
@@ -322,6 +352,41 @@ class Bot {
             }
         }
 
+        // const updateData = {};
+        // for (let key in supportedParams) {
+        //     if (supportedParams[key] === null) {
+        //         continue;
+        //     }
+        //     if (key === 'name') {
+        //         updateData.name = supportedParams[key];
+        //         game.name = updateData.name;
+        //     } else if (key === 'players') {
+        //         updateData.maxPlayers = parseInt(supportedParams[key], 10);
+        //         if (!updateData.maxPlayers || updateData.maxPlayers <= 0) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Кількість ігроків повинно бути числом більше 0.');
+        //         game.maxPlayers = updateData.maxPlayers;
+        //     } else if (key === 'date') {
+        //         const stringDate = supportedParams[key];
+        //         //const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
+        //         const parsedDate = parseDate(stringDate, chatSettings.settings.timezone);
+        //         if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.invalidDateFormatMessage);
+        //         updateData.date = new Date(parsedDate);
+        //         game.date = updateData.date;
+        //         game.isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
+        //     } else if (key === 'active') {
+        //         updateData.status = isTrue(supportedParams[key]) ? GameStatus.ACTIVE : GameStatus.INACTIVE;
+        //         game.status = updateData.status;
+        //     }
+        // }
+        // await this.database.updateGame(gameId, updateData);
+        // /*await*/ this.updateGameMessage(game);
+        const result = await this._changeGame(ctx, game, supportedParams);
+        if (result !== true) return;
+
+        const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
+        this.replyToUserDirectOrDoNothing(ctx, replyText);
+    }
+
+    async _changeGame(ctx, game, supportedParams) {
         const updateData = {};
         for (let key in supportedParams) {
             if (supportedParams[key] === null) {
@@ -331,27 +396,31 @@ class Bot {
                 updateData.name = supportedParams[key];
                 game.name = updateData.name;
             } else if (key === 'players') {
-                updateData.maxPlayers = parseInt(supportedParams[key]);
+                updateData.maxPlayers = parseInt(supportedParams[key], 10);
                 if (!updateData.maxPlayers || updateData.maxPlayers <= 0) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Кількість ігроків повинно бути числом більше 0.');
                 game.maxPlayers = updateData.maxPlayers;
             } else if (key === 'date') {
+                let subgame = (game.subgames || []).find(item => isDate(item.date));
+                if (subgame) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Не можна змінити дату у гри з підіграми (лігами).');
+
                 const stringDate = supportedParams[key];
                 //const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
+                const chatSettings = await this.database.getChatSettings(game.chatId);
                 const parsedDate = parseDate(stringDate, chatSettings.settings.timezone);
                 if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.invalidDateFormatMessage);
-                updateData.date = new Date(parsedDate);
-                game.date = updateData.date;
-                game.isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
+                game.date = updateData.date = new Date(parsedDate);
+                game.isDateWithoutTime = updateData.isDateWithoutTime = getDigitGroupCount(stringDate) < 4;
+                // game.date = updateData.date;
+                // game.isDateWithoutTime = updateData.isDateWithoutTime;
             } else if (key === 'active') {
-                updateData.status = isTrue(supportedParams[key]) ? GameStatus.ACTIVE : GameStatus.INACTIVE;
-                game.status = updateData.status;
+                game.status = updateData.status = isTrue(supportedParams[key]) ? GameStatus.ACTIVE : GameStatus.INACTIVE;
+                // game.status = updateData.status;
             }
         }
+        const gameId = game._id.toHexString();
         await this.database.updateGame(gameId, updateData);
         /*await*/ this.updateGameMessage(game);
-
-        const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
-        this.replyToUserDirectOrDoNothing(ctx, replyText);
+        return true;
     }
 
     async handleKickFromGame(ctx) {
@@ -405,10 +474,8 @@ class Bot {
         if (games.length) {
             const lines = [];
             for (const game of games) {
-                // let gameDate = date2int(game.date);
-                // if (gameDate && gameDate + 86400000 < Date.now()) return;
                 let gameDate = game.date;
-                let subgame = game.subgames.find(item => item.date instanceof Date && !isNaN(item.date) && item.date > now);
+                let subgame = (game.subgames || []).find(item => isDate(item.date) && (item.date + (item.isDateWithoutTime ? 86_400_000 : 0) > now));
                 if (subgame) {
                     gameDate = subgame.date;
                 }
@@ -520,7 +587,7 @@ class Bot {
                 .slice(0, showCount)
                 .map(game => {
                     let gameDate = game.date;
-                    let subgame = (game.subgames || []).find(item => item.date instanceof Date && !isNaN(item.date));
+                    let subgame = (game.subgames || []).find(item => isDate(item.date));
                     if (subgame) {
                         gameDate = subgame.date;
                     }
@@ -762,21 +829,76 @@ class Bot {
     }
 
     async handleGameActivation(ctx) {
+        // const cmdName = 'change_game';
+        // const gameId = ctx.match[1].split('_')[0];
+
+        // const game = await this.database.getGameWithPlayers(gameId);
+        // if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
+        // if (game.status === GameStatus.EXPIRED) return this.showPopup(ctx, this.emoji.warn + 'Гру вже закінчено.');
+
+        // const chatId = game.chatId;
+        // const chatSettings = await this.database.getChatSettings(chatId) || {};
+        // if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
+
+        // const updateData = {};
+        // // updateData.isActive = !game.isActive;
+        // // game.isActive = updateData.isActive;
+        // updateData.status = game.status === GameStatus.ACTIVE ? GameStatus.INACTIVE : GameStatus.ACTIVE;
+        // game.status = updateData.status;
+
+        // await this.database.updateGame(gameId, updateData);
+        // await this.updateGameMessage(game);
+
+        //const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
+        //this.replyToUserDirectOrDoNothing(ctx, replyText);
+
+        const game = await this._getAndCheckGameForActivation(ctx);
+        if (!game?._id) return;
+
+        const status = game.status === GameStatus.ACTIVE ? GameStatus.INACTIVE : GameStatus.ACTIVE;
+        this._setGameStatus(game, status);
+        this.showPopup(ctx, this.emoji.info + 'Гру ' + (status === GameStatus.ACTIVE ? 'відкрито.' : 'закрито.'));
+    }
+
+    async handleGameOpening(ctx) {
+        const game = await this._getAndCheckGameForActivation(ctx);
+        if (!game?._id) return false;
+        if (game.status === GameStatus.ACTIVE) return this.showPopup(ctx, this.emoji.info + 'Гра вже відкрита.');
+
+        this._setGameStatus(game, GameStatus.ACTIVE);
+        this.showPopup(ctx, this.emoji.info + 'Гру відкрито.');
+    }
+
+    async handleGameClosing(ctx) {
+        const game = await this._getAndCheckGameForActivation(ctx);
+        if (!game?._id) return false;
+        if (game.status === GameStatus.INACTIVE) return this.showPopup(ctx, this.emoji.info + 'Гра вже закрита.');
+
+        this._setGameStatus(game, GameStatus.INACTIVE);
+        this.showPopup(ctx, this.emoji.info + 'Гру закрито.');
+    }
+
+    async _getAndCheckGameForActivation(ctx) {
         const cmdName = 'change_game';
         const gameId = ctx.match[1].split('_')[0];
 
         const game = await this.database.getGameWithPlayers(gameId);
         if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
-        if (game.status === GameStatus.EXPIRED) return this.showPopup(ctx, this.emoji.warn + 'Гру закінчено вже.');
+        if (game.status === GameStatus.EXPIRED) return this.showPopup(ctx, this.emoji.warn + 'Гра вже закінчена.');
 
         const chatId = game.chatId;
         const chatSettings = await this.database.getChatSettings(chatId) || {};
-        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return false;
+
+        return game;
+    }
+
+    async _setGameStatus(game, status) {
+        const gameId = game._id.toHexString();
+        //console.log(gameId);
 
         const updateData = {};
-        // updateData.isActive = !game.isActive;
-        // game.isActive = updateData.isActive;
-        updateData.status = game.status === GameStatus.ACTIVE ? GameStatus.INACTIVE : GameStatus.ACTIVE;
+        updateData.status = status;
         game.status = updateData.status;
 
         await this.database.updateGame(gameId, updateData);
@@ -784,7 +906,21 @@ class Bot {
 
         //const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
         //this.replyToUserDirectOrDoNothing(ctx, replyText);
-        this.showPopup(ctx, this.emoji.info + 'Гру ' + (/*game.isActive*/game.status === GameStatus.ACTIVE ? 'відкрито.' : 'закрито.'));
+        //this.showPopup(ctx, this.emoji.info + 'Гру ' + (/*game.isActive*/game.status === GameStatus.ACTIVE ? 'відкрито.' : 'закрито.'));
+    }
+
+    async handleGameChanging(ctx, key) {
+        const game = await this._getAndCheckGameForActivation(ctx);
+        if (!game?._id) return false;
+
+        const gameId = ctx.match[1];
+        this.waitingInput[ctx.from.id] = { type: key, gameId };
+        if (key === 'players')
+            ctx.reply('Введіть нову кількість гравців (>0):');
+        else if (key === 'date')
+            ctx.reply('Введіть нову дату та час (YYYY-MM-DD HH:mm або YYYY-MM-DD):');
+        else if (key === 'name')
+            ctx.reply('Введіть нову назву гри:');
     }
 
     async handleGameSetup(ctx) {
@@ -798,7 +934,26 @@ class Bot {
         const chatSettings = await this.database.getChatSettings(chatId) || {};
         if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
 
-        this.showPopup(ctx, this.emoji.info + ' Даний функціонал у розробці. Слідкуйте за оновленнями.');
+        const userId = this.getUserId(ctx);
+        const user = await this.database.getUser(userId);
+        if (!user || !user.started) return this.showPopup(ctx, this.emoji.warn + ' Для налаштування гри слід перейти до бота на натиснути кнопку Start.');
+
+        // this.showPopup(ctx, this.emoji.info + ' Даний функціонал у розробці. Слідкуйте за оновленнями.');
+        const markup = Markup.inlineKeyboard([
+            [
+                Markup.button.callback('⏸️ Закрити игру', `disactivate_${gameId}`),
+                Markup.button.callback('▶️ Відкрити гру', `activate_${gameId}`)
+            ],
+            [
+                Markup.button.callback('✏️ К-ть гравців', `editMaxPlayers_${gameId}`),
+                Markup.button.callback('✏️ Дату, час', `editDate_${gameId}`)
+            ],
+            [
+                Markup.button.callback('✏️ Назву', `editName_${gameId}`)/*,
+                Markup.button.callback('✏️ Нагадування', `editNotif_${gameId}`)*/
+            ]
+        ]);
+        this.replyToUserDirectOrDoNothing(ctx, `Гра: ${game.name}`, markup);
     }
 
     async handleGameNotification(ctx) {
@@ -809,7 +964,7 @@ class Bot {
 
         let gameDate = game.date;
         let isDateWithoutTime = game.isDateWithoutTime;
-        let subgame = game.subgames.find(item => item.date instanceof Date && !isNaN(item.date));
+        let subgame = (game.subgames || []).find(item => isDate(item.date));
         if (subgame) {
             gameDate = subgame.date;
             isDateWithoutTime = subgame.isDateWithoutTime;
@@ -1048,12 +1203,12 @@ class Bot {
             //replyWarning(ctx);
     }
 
-    async replyToUserDirectOrDoNothing(ctx, message) {
+    async replyToUserDirectOrDoNothing(ctx, message, options = {}) {
         const userId = this.getUserId(ctx);
         const user = await this.database.getUser(userId);
         let sent = false;
         try {
-            await this.bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
+            await this.bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown', ...options });
             sent = true;
         } catch (error) {
             this.handleError(error);
@@ -1358,7 +1513,7 @@ class Bot {
             }
 
             const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
-            console.log(parsedDate);
+            // console.log(parsedDate);
             if (!parsedDate) {
                 return { error: true };
             }
@@ -1386,7 +1541,7 @@ class Bot {
 
             name = remainingArgs.join(' ');
             stringDate = extractDate(name) || parseDateWithTimezone(name);
-            console.log(stringDate);
+            // console.log(stringDate);
             maxPlayers = extractPlayers(name);
         } else {
             name = remainingArgs[0];

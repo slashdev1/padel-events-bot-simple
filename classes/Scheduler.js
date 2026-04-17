@@ -1,4 +1,5 @@
 const cron = require('node-cron');
+const { isDate } = require('../helpers/utils');
 
 class Scheduler {
     constructor(database, bot, checkInterval = 5) {
@@ -42,7 +43,8 @@ class Scheduler {
             for (const game of activeGames) {
                 let gameDate = game.date;
                 let isDateWithoutTime = game.isDateWithoutTime;
-                let subgame = game.subgames.find(item => item.date instanceof Date && !isNaN(item.date) && item.date > now);
+                // TODO: для кожної сабгри з майбутньою датою треба нотифікації!!!
+                let subgame = game.subgames.find(item => isDate(item.date) && item.date > now);
                 if (subgame) {
                     gameDate = subgame.date;
                     isDateWithoutTime = subgame.isDateWithoutTime;

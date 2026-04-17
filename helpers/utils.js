@@ -107,17 +107,6 @@ function occurrences(string, subString, allowOverlapping) {
 const isTrue = (str) => ['1', 'true', 'yes'].indexOf(str.toLowerCase()) >= 0;
 const isFalse = (str) => !isTrue(str);
 
-const date2int = (date) => (typeof date === 'string' ? Date.parse(date) : (date instanceof Date ? date.getTime() : +date)) || 0; // deprecated in the nearest future
-
-const date2text = (date) => {
-    const int = date2int(date);
-    if (!int) return '';
-    return new Date(int).toLocaleDateString('uk-UA', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    });
-};
 
 const isNumeric = (input) => {
     return typeof input === 'number' || !Number.isNaN(Number(input));
@@ -377,6 +366,8 @@ const getDigitGroupCount = (str) => (str?.match(/\d+/g) || []).length;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+const isDate = (date) => date instanceof Date && !isNaN(date);
+
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
     date.setDate(date.getDate() + days);
@@ -418,8 +409,6 @@ module.exports = {
     isFalse,
     isNumeric,
     str2params,
-    date2int,
-    date2text,
     parseDate,
     textMarkdownNormalize,
     getStatusByAction,
@@ -437,5 +426,6 @@ module.exports = {
     extractPlayers,
     getDigitGroupCount,
     sleep,
-    formatToTimeZone
+    formatToTimeZone,
+    isDate
 };

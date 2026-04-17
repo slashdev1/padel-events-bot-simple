@@ -326,20 +326,6 @@ class Database {
         }
     }
 
-    // async getGamesForNotification(dateStart, dateEnd, onlyIfDateWithTime = false) {
-    //     const filter = {
-    //         //isActive: true,
-    //         status: GameStatus.ACTIVE,
-    //         date: { $gte: dateStart, $lte: dateEnd },
-    //         ...(onlyIfDateWithTime && { isDateWithoutTime: false })
-    //     };
-    //     return await this.findGames(filter);
-    // }
-
-    // async findGames(filter) {
-    //     return await this.gamesCollection().find(filter).toArray();
-    // }
-
     async findGames(filter) {
         return await this.gamesCollection().aggregate([
             {
