@@ -7,6 +7,7 @@ class Scheduler {
         this.bot = bot;
         this.jobs = [];
         this.checkInterval = checkInterval;
+        this.emoji = require('../config/emoji.json');
     }
 
     start() {
@@ -123,7 +124,7 @@ class Scheduler {
 
     async sendDynamicNotification(game, minutesBefore) {
         const timeText = this.formatMinutesText(minutesBefore);
-        const replyText = `🔔 Нагадування\n\nГра "${game.name}" відбудеться ${timeText}!`;
+        const replyText = `${this.emoji.notif} Нагадування\n\nГра "${game.name}" відбудеться ${timeText}!`;
 
         try {
             await this.bot.sendMessage(game.chatId, replyText, {
@@ -147,7 +148,7 @@ class Scheduler {
         if (!user.started) return;
 
         const timeText = this.formatMinutesText(minutesBefore);
-        const replyText = `🔔 Нагадування\n\nГра "${game.name}" відбудеться ${timeText}!`;
+        const replyText = `${this.emoji.notif} Нагадування\n\nГра "${game.name}" відбудеться ${timeText}!`;
         console.log(`Відправка користувачу ${user.userId} повідомлення ${replyText}`);
 
         // try {

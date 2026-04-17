@@ -80,6 +80,8 @@ class Bot {
         this.bot.action(/^editMaxPlayers_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'players'));
         this.bot.action(/^editDate_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'date'));
         this.bot.action(/^editName_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'name'));
+
+        this.bot.action(/^settings_(.*)$/, (ctx) => this.handleChatChangeSettings(ctx));
     }
 
     setupMyChatMember() {
@@ -512,12 +514,34 @@ class Bot {
 
     async handleSettings(ctx) {
         const chatId = this.getChatId(ctx);
-        if (this.isGroup(chatId)) return; // Ця команда тільки для чату користувача
-
         const userId = this.getUserId(ctx);
-        const user = await this.database.getUserFromDB(userId);
+        let settings;
+        if (this.isGroup(chatId)) {
+            const chatSettings = await this.database.getChatSettings(chatId) || {};
+            settings = chatSettings.settings || {};
+        } else {
+            const user = await this.database.getUserFromDB(userId);
+            settings = user.settings || {};
+        }
+
+        const msgText = ctx.message.text;
+        let [cmdName, ...args] = str2params(msgText);
+        cmdName = cmdName.slice(1);
+
+        const chatSettings = await this.database.getChatSettings(chatId) || {};
+
+        // const chatId = this.getChatId(ctx);
+        // if (this.isGroup(chatId)) return; // Ця команда тільки для чату користувача
+
+        // const userId = this.getUserId(ctx);
+        // const user = await this.database.getUserFromDB(userId);
+        const markup = Markup.inlineKeyboard([Markup.button.callback(this.emoji.setup + ' Змінити налаштування', `settings_${chatId}`)]);
+        const msg = this.emoji.setup + ' Поточні налаштування:\n\n' + JSON.stringify(settings || {}, null, 2);
         try {
-            await this.bot.telegram.sendMessage(userId, JSON.stringify(user.settings || {}, null, 2));
+            if (this.isGroup(chatId))
+                this.replyOrDoNothing(ctx, msg, markup);
+            else
+                await this.sendMessage(userId, msg, markup);
         } catch (error) {
             console.error(`[Telegram Error] Chat ${userId}:`, error.message);
         }
@@ -956,6 +980,14 @@ class Bot {
         this.replyToUserDirectOrDoNothing(ctx, `Гра: ${game.name}`, markup);
     }
 
+    async handleChatChangeSettings(ctx) {
+        this.showPopup(ctx, this.emoji.warn + 'Функціонал у розробці.');
+
+        const cmdName = 'change_settings';
+        const chatId = ctx.match[1].split('_')[0];
+        console.log(cmdName, chatId);
+    }
+
     async handleGameNotification(ctx) {
         const gameId = ctx.match[1].split('_')[0];
 
@@ -981,8 +1013,8 @@ class Bot {
 
         const notification = await this.database.createNotification(gameId, userId);
         if (!notification) return this.showPopup(ctx, this.emoji.err + 'Помилка при створені нагадування. Зверніться до розробника.');
-        if (!notification.isActive) return this.showPopup(ctx, this.emoji.bell + 'Нагадування про гру видалено. Не запізнюйтесь на гру.');
-        this.showPopup(ctx, this.emoji.bell + 'Нагадаю вам про гру за 1 годину. Набирайтесь сил.');
+        if (!notification.isActive) return this.showPopup(ctx, this.emoji.notif + 'Нагадування про гру видалено. Не запізнюйтесь на гру.');
+        this.showPopup(ctx, this.emoji.notif + 'Нагадаю вам про гру за 1 годину. Набирайтесь сил.');
     }
 
     buildTextMessage(game, chatSettings) {
@@ -1041,8 +1073,8 @@ class Bot {
         buttons.push([
             Markup.button.callback(/*game.isActive*/game.status === GameStatus.ACTIVE ? '⏸️ Закрити' : '▶️ Відкрити гру', `activation_${gameId}`),
             ...(/*game.isActive*/game.status === GameStatus.ACTIVE ? [
-                Markup.button.callback(this.emoji.bell + 'За 1 год.', `notification_${gameId}`),
-                Markup.button.callback('⚙️', `setup_${gameId}`)
+                Markup.button.callback(this.emoji.notif + 'За 1 год.', `notification_${gameId}`),
+                Markup.button.callback(this.emoji.setup, `setup_${gameId}`)
             ] : []),
         ]);
         if (/*!game.isActive*/game.status !== GameStatus.ACTIVE) return Markup.inlineKeyboard(buttons);
@@ -1335,9 +1367,9 @@ class Bot {
         }
     }
 
-    getDefaultSettings() {
+    getDefaultSettings(isGroup = true) {
         return {
-            license: this.config.licenseClientDefault || 'free',
+            ...(!!isGroup ? { license: this.config.licenseClientDefault || 'free' } : {}),
             timezone: this.config.timezoneClientDefault,
             notificationTerms: this.config.notificationTerms || '-1440,-60'
         };
@@ -1455,7 +1487,7 @@ class Bot {
         }
         else {
             const started = status === 'member';
-            this.database.updateUser({ id: chatId, started, ...(needToSetDefaultSettings ? { settings: this.getDefaultSettings() } : {}), ...(started ? ctx.from : {}) });
+            this.database.updateUser({ id: chatId, started, ...(needToSetDefaultSettings ? { settings: this.getDefaultSettings(false) } : {}), ...(started ? ctx.from : {}) });
         }
     }
 
