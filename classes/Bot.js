@@ -264,7 +264,7 @@ class Bot {
         const chatSettings = await this.database.getChatSettings(chatId) || {};
         if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, cmdName, chatSettings)) return;
 
-        let { error, name, maxPlayers, date, isDateWithoutTime, subgames } = this.parseGameData(args, chatSettings);
+        let { error, name, maxPlayers, date, isDateWithoutTime, subgames } = this.parseGameData(ctx, args, chatSettings);
         if (error) return error;
 
         const creatorId = this.getUserId(ctx);
@@ -1498,7 +1498,7 @@ class Bot {
         );
     }
 
-    parseGameData(args, chatSettings) {
+    parseGameData(ctx, args, chatSettings) {
         const buildRemainingArgs = (args) => {
             const params = {};
             const remainingArgs = args.filter(item => {
