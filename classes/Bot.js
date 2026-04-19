@@ -46,7 +46,8 @@ class Bot {
     }
 
     // Для кнопок з вводом тексту
-    waitingInput = {}; // { userId: { type, gameId } }
+    waitingInput = {}; // { userId: { messageId, type, gameId, chatId } }
+    currentMarkup = {}; // { messageId: markup }
 
     setupCommands() {
         this.bot.command('start', this.handleStart.bind(this));
@@ -77,11 +78,19 @@ class Bot {
 
         this.bot.action(/^activate_(.*)$/, (ctx) => this.handleGameOpening(ctx));
         this.bot.action(/^disactivate_(.*)$/, (ctx) => this.handleGameClosing(ctx));
-        this.bot.action(/^editMaxPlayers_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'players'));
-        this.bot.action(/^editDate_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'date'));
-        this.bot.action(/^editName_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'name'));
+        this.bot.action(/^edit_game_maxPlayers_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'players'));
+        this.bot.action(/^edit_game_date_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'date'));
+        this.bot.action(/^edit_game_name_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'name'));
 
-        this.bot.action(/^settings_(.*)$/, (ctx) => this.handleChatChangeSettings(ctx));
+        this.bot.action(/^settings_(.*)$/, (ctx) => this.handleShowSettings(ctx));
+        this.bot.action(/^back_to_settings_(.*)$/, (ctx) => this.handleBackToShowSettings(ctx));
+        this.bot.action(/^edit_settings_tz_(.*)$/, (ctx) => this.handleSettingsChanging(ctx, 'tz'));
+        this.bot.action(/^edit_settings_notif_(.*)$/, (ctx) => this.handleSettingsChanging(ctx, 'notif'));
+        this.bot.action(/^edit_settings_allowVotePlusWO_(.*)$/, (ctx) => this.handleSettingsChanging(ctx, 'allowVotePlusWO'));
+        this.bot.action(/^set_settings_tz_(.*)$/, (ctx) => this.handleSettingsSetTimeZone(ctx));
+        this.bot.action(/^set_settings_notif_(.*)$/, (ctx) => this.handleSettingsSetNotificationTerms(ctx));
+        this.bot.action(/^set_settings_allowVotePlusWO_(.*)$/, (ctx) => this.handleSettingsSetAllowVotePlusWO(ctx));
+        this.bot.action(/^permissions_(.*)$/, (ctx) => this.showPopup(ctx, this.emoji.info + ' Даний функціонал у розробці. Слідкуйте за оновленнями.'));
     }
 
     setupMyChatMember() {
@@ -161,17 +170,31 @@ class Bot {
             const input = this.waitingInput[ctx.from.id];
             if (!input) return;
 
-            const { type, gameId } = input;
-            const game = await this.database.getGameWithPlayers(gameId);
-            if (!game) return;
+            const { type, gameId, chatId, messageId } = input;
+            if (gameId) {
+                const game = await this.database.getGameWithPlayers(gameId);
+                if (!game) return;
 
-            let update = { [type]: ctx.message.text };
+                let update = { [type]: ctx.message.text };
+                delete(this.waitingInput[ctx.from.id]);
+
+                const result = await this._changeGame(ctx, game, update);
+                if (result !== true) return;
+
+                ctx.reply(this.emoji.info + 'Гру змінено.');
+                return;
+            }
+
+            if (!chatId) return;
+
+            if (type === 'timezone') {
+                ctx.match = [null, `${ctx.message.text}_${chatId}`];
+                this.handleSettingsSetTimeZone(ctx, messageId);
+            } else if (type === 'notificationTerms') {
+                ctx.match = [null, `${ctx.message.text}_${chatId}`];
+                this.handleSettingsSetNotificationTerms(ctx, messageId);
+            }
             delete(this.waitingInput[ctx.from.id]);
-
-            const result = await this._changeGame(ctx, game, update);
-            if (result !== true) return;
-
-            ctx.reply(this.emoji.info + 'Гру змінено.');
         });
     }
 
@@ -262,7 +285,8 @@ class Bot {
         cmdName = cmdName.slice(1);
 
         const chatSettings = await this.database.getChatSettings(chatId) || {};
-        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, cmdName, chatSettings)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, cmdName, chatSettings))
+            return false;
 
         let { error, name, maxPlayers, date, isDateWithoutTime, subgames } = this.parseGameData(ctx, args, chatSettings);
         if (error) return error;
@@ -308,7 +332,8 @@ class Bot {
         if (!game) return;
 
         const chatId = game.chatId;
-        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName))
+            return false;
 
         if (game.status !== GameStatus.DELETED) await this.database.deactivateGame(gameId);
         try {
@@ -337,8 +362,8 @@ class Bot {
         if (!game) return;
 
         const chatId = game.chatId;
-        const chatSettings = await this.database.getChatSettings(chatId) || {};
-        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName))
+            return false;
 
         const supportedParams = { name: null, players: null, date: null, active: null };
         for (let i = 0; i < args.length; i++) {
@@ -354,33 +379,6 @@ class Bot {
             }
         }
 
-        // const updateData = {};
-        // for (let key in supportedParams) {
-        //     if (supportedParams[key] === null) {
-        //         continue;
-        //     }
-        //     if (key === 'name') {
-        //         updateData.name = supportedParams[key];
-        //         game.name = updateData.name;
-        //     } else if (key === 'players') {
-        //         updateData.maxPlayers = parseInt(supportedParams[key], 10);
-        //         if (!updateData.maxPlayers || updateData.maxPlayers <= 0) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Кількість ігроків повинно бути числом більше 0.');
-        //         game.maxPlayers = updateData.maxPlayers;
-        //     } else if (key === 'date') {
-        //         const stringDate = supportedParams[key];
-        //         //const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
-        //         const parsedDate = parseDate(stringDate, chatSettings.settings.timezone);
-        //         if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.invalidDateFormatMessage);
-        //         updateData.date = new Date(parsedDate);
-        //         game.date = updateData.date;
-        //         game.isDateWithoutTime = stringDate.match(/\d+/g).length < 4;
-        //     } else if (key === 'active') {
-        //         updateData.status = isTrue(supportedParams[key]) ? GameStatus.ACTIVE : GameStatus.INACTIVE;
-        //         game.status = updateData.status;
-        //     }
-        // }
-        // await this.database.updateGame(gameId, updateData);
-        // /*await*/ this.updateGameMessage(game);
         const result = await this._changeGame(ctx, game, supportedParams);
         if (result !== true) return;
 
@@ -437,7 +435,8 @@ class Bot {
         if (!game) return;
 
         const chatId = game.chatId;
-        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName))
+            return false;
 
         let player = args.shift();
         const filtered = game.players.filter(p => String(p.id) === player || p.name === player);
@@ -514,34 +513,20 @@ class Bot {
 
     async handleSettings(ctx) {
         const chatId = this.getChatId(ctx);
+        if (this.isGroup(chatId) && !await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, 'change_settings'))
+            return false;
+
         const userId = this.getUserId(ctx);
-        let settings;
-        if (this.isGroup(chatId)) {
-            const chatSettings = await this.database.getChatSettings(chatId) || {};
-            settings = chatSettings.settings || {};
-        } else {
-            const user = await this.database.getUserFromDB(userId);
-            settings = user.settings || {};
-        }
+        const settings = await this.database.getSettingsByChatId(chatId);
 
         const msgText = ctx.message.text;
         let [cmdName, ...args] = str2params(msgText);
         cmdName = cmdName.slice(1);
 
-        const chatSettings = await this.database.getChatSettings(chatId) || {};
-
-        // const chatId = this.getChatId(ctx);
-        // if (this.isGroup(chatId)) return; // Ця команда тільки для чату користувача
-
-        // const userId = this.getUserId(ctx);
-        // const user = await this.database.getUserFromDB(userId);
-        const markup = Markup.inlineKeyboard([Markup.button.callback(this.emoji.setup + ' Змінити налаштування', `settings_${chatId}`)]);
-        const msg = this.emoji.setup + ' Поточні налаштування:\n\n' + JSON.stringify(settings || {}, null, 2);
+        const markup = this.getMarkupForSettings(chatId);
+        const msg = this.buildTextMessageOfCurrentSettings(settings, chatId, ctx.chat.title);
         try {
-            if (this.isGroup(chatId))
-                this.replyOrDoNothing(ctx, msg, markup);
-            else
-                await this.sendMessage(userId, msg, markup);
+            this.sendMessage(userId, msg, markup);
         } catch (error) {
             console.error(`[Telegram Error] Chat ${userId}:`, error.message);
         }
@@ -566,15 +551,12 @@ class Bot {
             return;
         }
         if (key === 'timezone') {
-            let timeZones = Intl.supportedValuesOf('timeZone');
-            timeZones.push('Europe/Kyiv'); // тому що у цьому списку може бути тільки "Europe/Kiev"
-            if (!timeZones.find(v => v === keyValueObj[key])) {
-                await this.sendMessage(userId, this.emoji.warn + 'Некоректне значення налаштування. Доспупні значення: ' + JSON.stringify(timeZones));
-                return;
-            }
+            if (this._checkTimeZone(keyValueObj[key], userId) !== true) return;
+        } else if (key === 'notificationTerms') {
+            if (this._checkNotificationTerms(keyValueObj[key], userId) !== true) return;
         }
         await this.database.updateUser({ ...ctx.from, settings: keyValueObj }, true);
-        await this.sendMessage(userId, this.emoji.info + `Налаштування ${key} оновлене.`);
+        /*await*/ this.sendMessage(userId, this.emoji.info + `Налаштування ${key} оновлене.`);
     }
 
     async handleRefreshGameMessage(ctx) {
@@ -853,29 +835,6 @@ class Bot {
     }
 
     async handleGameActivation(ctx) {
-        // const cmdName = 'change_game';
-        // const gameId = ctx.match[1].split('_')[0];
-
-        // const game = await this.database.getGameWithPlayers(gameId);
-        // if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
-        // if (game.status === GameStatus.EXPIRED) return this.showPopup(ctx, this.emoji.warn + 'Гру вже закінчено.');
-
-        // const chatId = game.chatId;
-        // const chatSettings = await this.database.getChatSettings(chatId) || {};
-        // if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
-
-        // const updateData = {};
-        // // updateData.isActive = !game.isActive;
-        // // game.isActive = updateData.isActive;
-        // updateData.status = game.status === GameStatus.ACTIVE ? GameStatus.INACTIVE : GameStatus.ACTIVE;
-        // game.status = updateData.status;
-
-        // await this.database.updateGame(gameId, updateData);
-        // await this.updateGameMessage(game);
-
-        //const replyText = `Ви щойно змінили гру "${game.name}" (id=${gameId}).`
-        //this.replyToUserDirectOrDoNothing(ctx, replyText);
-
         const game = await this._getAndCheckGameForActivation(ctx);
         if (!game?._id) return;
 
@@ -911,8 +870,8 @@ class Bot {
         if (game.status === GameStatus.EXPIRED) return this.showPopup(ctx, this.emoji.warn + 'Гра вже закінчена.');
 
         const chatId = game.chatId;
-        const chatSettings = await this.database.getChatSettings(chatId) || {};
-        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return false;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName))
+            return false;
 
         return game;
     }
@@ -955,8 +914,8 @@ class Bot {
         if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
 
         const chatId = game.chatId;
-        const chatSettings = await this.database.getChatSettings(chatId) || {};
-        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName, chatSettings)) return;
+        if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, game.createdById, cmdName))
+            return false;
 
         const userId = this.getUserId(ctx);
         const user = await this.database.getUser(userId);
@@ -969,23 +928,193 @@ class Bot {
                 Markup.button.callback('▶️ Відкрити гру', `activate_${gameId}`)
             ],
             [
-                Markup.button.callback('✏️ К-ть гравців', `editMaxPlayers_${gameId}`),
-                Markup.button.callback('✏️ Дату, час', `editDate_${gameId}`)
+                Markup.button.callback(this.emoji.edit + ' К-ть гравців', `edit_game_maxPlayers_${gameId}`),
+                Markup.button.callback(this.emoji.edit + ' Дату, час', `edit_game_date_${gameId}`)
             ],
             [
-                Markup.button.callback('✏️ Назву', `editName_${gameId}`)/*,
-                Markup.button.callback('✏️ Нагадування', `editNotif_${gameId}`)*/
+                Markup.button.callback(this.emoji.edit + ' Назву', `edit_game_name_${gameId}`)/*,
+                Markup.button.callback(this.emoji.edit + ' Нагадування', `editNotif_${gameId}`)*/
             ]
         ]);
         this.replyToUserDirectOrDoNothing(ctx, `Гра: ${game.name}`, markup);
     }
 
-    async handleChatChangeSettings(ctx) {
-        this.showPopup(ctx, this.emoji.warn + 'Функціонал у розробці.');
-
+    async handleShowSettings(ctx) {
         const cmdName = 'change_settings';
+        const chatId = +(ctx.match[1].split('_')[0]);
+        if (this.isGroup(chatId) && !await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, cmdName)) {
+            // для груп треба перевірити права на цю команду
+            return false;
+        }
+
+        const buttons = [
+            [Markup.button.callback(this.emoji.edit + ' Часову зону', `edit_settings_tz_${chatId}`)],
+            [Markup.button.callback(this.emoji.edit + ' Інтервал нагадувань', `edit_settings_notif_${chatId}`)]
+        ];
+        if (this.isGroup(chatId))
+            buttons.push([Markup.button.callback(this.emoji.edit + ' Дозволити "+" якщо сам ігрок не йде', `edit_settings_allowVotePlusWO_${chatId}`)]);
+        buttons.push([Markup.button.callback('🔙 Назад', `back_to_settings_${chatId}`)]);
+        /*await*/ ctx.editMessageReplyMarkup(
+            Markup.inlineKeyboard(buttons).reply_markup
+        );
+    }
+
+    async handleBackToShowSettings(ctx) {
         const chatId = ctx.match[1].split('_')[0];
-        console.log(cmdName, chatId);
+
+        const markup = this.getMarkupForSettings(chatId); // Markup.inlineKeyboard([Markup.button.callback(this.emoji.setup + ' Змінити налаштування', `settings_${chatId}`)]);
+        await ctx.editMessageReplyMarkup(
+            markup.reply_markup
+        );
+    }
+
+    async handleSettingsChanging(ctx, mode) {
+        const chatId = ctx.match[1];
+        this.showPopup(ctx, '');
+
+        if (mode === 'tz') {
+            await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([
+                [Markup.button.callback('Europe/Kyiv', `set_settings_tz_Europe/Kyiv_${chatId}`)],
+                [Markup.button.callback('Europe/Warsaw', `set_settings_tz_Europe/Warsaw_${chatId}`)],
+                [Markup.button.callback('Europe/Madrid', `set_settings_tz_Europe/Madrid_${chatId}`)],
+                [Markup.button.callback('Ввести вручну', `set_settings_tz_manual_${chatId}`)],
+                [Markup.button.callback('🔙 До налаштувань', `back_to_settings_${chatId}`)]
+            ]).reply_markup);
+        } else if (mode === 'notif') {
+            await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([
+                [Markup.button.callback('Не нагадувати', `set_settings_notif__${chatId}`)],
+                [Markup.button.callback('За день, за 2 години', `set_settings_notif_-1440,-120_${chatId}`)],
+                [Markup.button.callback('За день, за 1 годину', `set_settings_notif_-1440,-60_${chatId}`)],
+                [Markup.button.callback('За 2 години', `set_settings_notif_-120_${chatId}`)],
+                [Markup.button.callback('За 1 годину', `set_settings_notif_-60_${chatId}`)],
+                [Markup.button.callback('Ввести вручну', `set_settings_notif_manual_${chatId}`)],
+                [Markup.button.callback('🔙 До налаштувань', `back_to_settings_${chatId}`)]
+            ]).reply_markup);
+        } else if (mode === 'allowVotePlusWO') {
+            await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([
+                [Markup.button.callback('Ні', `set_settings_allowVotePlusWO_0_${chatId}`)],
+                [Markup.button.callback('Так', `set_settings_allowVotePlusWO_1_${chatId}`)],
+                [Markup.button.callback('🔙 До налаштувань', `back_to_settings_${chatId}`)]
+            ]).reply_markup);
+        }
+    }
+
+    async handleSettingsSetTimeZone(ctx, messageId) {
+        if (!messageId) {
+            messageId = ctx.update.callback_query.message.message_id;
+            this.currentMarkup[messageId] = ctx.update.callback_query.message.reply_markup;
+        }
+
+        const key = 'timezone';
+        let [value, chatId] = ctx.match[1].split('_');
+        chatId = +chatId;
+        if (this.isGroup(chatId) && !await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, 'change_settings'))
+            return false;
+
+        if (value === 'manual') {
+            this.waitingInput[ctx.from.id] = { type: key, chatId, messageId };
+            ctx.reply('Введіть часову зону:', { reply_to_message_id: messageId });
+            return;
+        }
+
+        const userId = this.getUserId(ctx);
+        if (this._checkTimeZone(value, userId) !== true) return;
+
+        const settings = await this.database.getSettingsByChatId(chatId);
+        settings[key] = value;
+        let chatName;
+        if (this.isGroup(chatId)) {
+            await this.database.updateChatSettings({ chatId, settings });
+            chatName = (await this.database.getChatSettings(chatId) || {}).chatName;
+        } else {
+            await this.database.updateUser({ id: userId, settings }, true);
+        }
+
+        // delete(this.currentMarkup[messageId]);
+
+        const msg = this.emoji.info + ' Налаштування змінено.';
+        if (ctx.callbackQuery) this.showPopup(ctx, msg);
+        else this.replyToUserDirectOrDoNothing(ctx, msg);
+
+        const _chatId = ctx.update?.callback_query?.message?.chat?.id || this.getChatId(ctx);
+        this.updateSetingsMessage(_chatId, messageId, settings, chatId, chatName);
+    }
+
+    async handleSettingsSetNotificationTerms(ctx, messageId) {
+        if (!messageId) {
+            messageId = ctx.update.callback_query.message.message_id;
+            this.currentMarkup[messageId] = ctx.update.callback_query.message.reply_markup;
+        }
+
+        const key = 'notificationTerms';
+        let [value, chatId] = ctx.match[1].split('_');
+        chatId = +chatId;
+        if (this.isGroup(chatId) && !await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, 'change_settings'))
+            return false;
+
+        if (value === 'manual') {
+            const messageId = ctx.update.callback_query.message.message_id;
+            this.waitingInput[ctx.from.id] = { type: key, chatId, messageId: messageId };
+            ctx.reply('Введіть за скільки хвилин треба надсилати нагадування (якщо декілька, то через кому):', { reply_to_message_id: messageId });
+            return;
+        }
+
+        const userId = this.getUserId(ctx);
+        if (this._checkNotificationTerms(value, userId) !== true) return;
+
+        const settings = await this.database.getSettingsByChatId(chatId);
+        settings[key] = value;
+        let chatName;
+        if (this.isGroup(chatId)) {
+            await this.database.updateChatSettings({ chatId, settings });
+            chatName = (await this.database.getChatSettings(chatId) || {}).chatName;
+        } else {
+            await this.database.updateUser({ id: userId, settings }, true);
+        }
+
+        // delete(this.currentMarkup[messageId]);
+
+        const msg = this.emoji.info + ' Налаштування змінено.';
+        if (ctx.callbackQuery) this.showPopup(ctx, msg);
+        else this.replyToUserDirectOrDoNothing(ctx, msg);
+
+        const _chatId = ctx.update?.callback_query?.message?.chat?.id || this.getChatId(ctx);
+        this.updateSetingsMessage(_chatId, messageId, settings, chatId, chatName);
+    }
+
+    async handleSettingsSetAllowVotePlusWO(ctx) {
+        const messageId = ctx.update.callback_query.message.message_id;
+        this.currentMarkup[messageId] = ctx.update.callback_query.message.reply_markup;
+
+        const key = 'allowVotePlusWithoutMainPlayers';
+        let [value, chatId] = ctx.match[1].split('_');
+        chatId = +chatId;
+        if (this.isGroup(chatId) && !await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, 'change_settings'))
+            return false;
+
+        value = !!(+value);
+
+        const userId = this.getUserId(ctx);
+        // if (this._checkNotificationTerms(value, userId) !== true) return;
+
+        const settings = await this.database.getSettingsByChatId(chatId);
+        settings[key] = value;
+        let chatName;
+        if (this.isGroup(chatId)) {
+            await this.database.updateChatSettings({ chatId, settings });
+            chatName = (await this.database.getChatSettings(chatId) || {}).chatName;
+        } else {
+            await this.database.updateUser({ id: userId, settings }, true);
+        }
+
+        // delete(this.currentMarkup[messageId]);
+
+        const msg = this.emoji.info + ' Налаштування змінено.';
+        if (ctx.callbackQuery) this.showPopup(ctx, msg);
+        else this.replyToUserDirectOrDoNothing(ctx, msg);
+
+        const _chatId = ctx.update?.callback_query?.message?.chat?.id || this.getChatId(ctx);
+        this.updateSetingsMessage(_chatId, messageId, settings, chatId, chatName);
     }
 
     async handleGameNotification(ctx) {
@@ -1180,10 +1309,10 @@ class Bot {
         return chatSettings;
     }
 
-    async ensureAccess(ctx, userId, chatId, createdById, cmdName, chatSettings) {
+    async ensureAccess(ctx, userId, chatId, createdById, cmdName, chatSettings = null) {
         if (await this.isSuperAdmin(userId)) return true;
 
-        if (chatSettings == null) chatSettings = {};
+        if (!chatSettings) chatSettings = {};
         Object.assign(chatSettings, await this.getOrCreateChatSettings(ctx, chatId));
 
         const defaults = this.getDefaultPermissions(chatSettings.license);
@@ -1371,7 +1500,8 @@ class Bot {
         return {
             ...(!!isGroup ? { license: this.config.licenseClientDefault || 'free' } : {}),
             timezone: this.config.timezoneClientDefault,
-            notificationTerms: this.config.notificationTerms || '-1440,-60'
+            notificationTerms: this.config.notificationTerms || '-1440,-60',
+            ...(!!isGroup ? { allowVotePlusWithoutMainPlayers: false } : {})
         };
     }
 
@@ -1380,7 +1510,8 @@ class Bot {
             { command: 'add_game', appliesTo: 'all' },
             { command: 'del_game', appliesTo: 'admins,author' },
             { command: 'change_game', appliesTo: 'admins,author' },
-            { command: 'kick', appliesTo: 'admins,author' }
+            { command: 'kick', appliesTo: 'admins,author' },
+            { command: 'change_settings', appliesTo: 'admins' }
         ];
     }
 
@@ -1389,7 +1520,7 @@ class Bot {
         const chatSettings = {
             chatId,
             chatName: ctx.chat.title,
-            allMembersAreAdministrators: ctx.chat.all_members_are_administrators,
+            // allMembersAreAdministrators: ctx.chat.all_members_are_administrators,
             license: config.license,
             botStatus: 'unknown',
             reminders: [],
@@ -1399,10 +1530,10 @@ class Bot {
             settings: {
                 timezone: config.timezone,
                 notificationTerms: config.notificationTerms,
-                allowVotePlusWithoutMainPlayers: false
+                allowVotePlusWithoutMainPlayers: config.allowVotePlusWithoutMainPlayers
             }
         }
-        if (!chatSettings.allMembersAreAdministrators) {
+        // if (!chatSettings.allMembersAreAdministrators) {
             const admins = this.isGroup(chatId) && await this.bot.telegram.getChatAdministrators(chatId);
             if (admins && admins.length) {
                 chatSettings.admins = admins.map(adm => {
@@ -1412,7 +1543,7 @@ class Bot {
                     }
                 });
             }
-        }
+        // }
         return chatSettings;
     }
 
@@ -1621,6 +1752,68 @@ class Bot {
         }
         if (!cmdNames.length) cmdNames.push(cmdName);
         return cmdNames;
+    }
+
+    _checkTimeZone(timezone, userId) {
+        let timeZones = Intl.supportedValuesOf('timeZone');
+        timeZones.push('Europe/Kyiv'); // тому що у цьому списку може бути тільки "Europe/Kiev"
+        if (!timeZones.find(v => v === timezone)) {
+            this.sendMessage(userId, this.emoji.warn + 'Некоректне значення налаштування. Доспупні значення: ' + JSON.stringify(timeZones));
+            return false;
+        }
+        return true;
+    }
+
+    _checkNotificationTerms(notificationTerms, userId) {
+        if (notificationTerms.trim().length === 0) return true;
+        const notificationTermsArray = notificationTerms.split(',').map(Number);
+        if (notificationTermsArray.includes(NaN)) {
+            this.sendMessage(userId, this.emoji.warn + 'Некоректне значення налаштування.');
+            return false;
+        }
+        return true;
+    }
+
+    async getChatAdmins(chatId) {
+        return await this.bot.telegram.getChatAdministrators(chatId);
+    }
+
+    buildTextMessageOfCurrentSettings(settings, chatId, chatName) {
+        let extra = ''
+        if (this.isGroup(chatId)) {
+            const chatTitle = chatName;
+            extra = ' для групи ' + chatTitle;
+        }
+        return this.emoji.setup + ' Поточні налаштування' + extra + ':\n\n' + JSON.stringify(settings || {}, null, 2)
+    }
+
+    async updateSetingsMessage(chatId, messageId, settings, chatIdForSettings, chatNameForSettings) {
+        // console.log(chatId, messageId, settings, chatNameForSettings);
+        try {
+            await this.bot.telegram.editMessageText(
+                chatId,
+                messageId,
+                null,
+                this.buildTextMessageOfCurrentSettings(settings, chatIdForSettings, chatNameForSettings),
+                { reply_markup: this.currentMarkup[messageId] }
+            );
+        } catch (error) {
+            // Bad Request: message is not modified:
+            const desc = error?.response?.description || error?.description || '';
+            if (error?.response?.error_code === 400 && desc.includes('message is not modified')) {
+                return;
+            }
+            console.error(error);
+        }
+    }
+
+    getMarkupForSettings(chatId) {
+        const buttons = [
+            [Markup.button.callback(this.emoji.setup + ' Змінити налаштування', `settings_${chatId}`)]
+        ];
+        if (this.isGroup(chatId))
+            buttons.push([Markup.button.callback(this.emoji.access + ' Змінити права та доступ', `permissions_${chatId}`)]);
+        return Markup.inlineKeyboard(buttons);
     }
 }
 

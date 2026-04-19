@@ -1,7 +1,7 @@
 const { MongoClient, ObjectId } = require('mongodb');
 const Cache = require('./Cache');
 const Config = require('./Config');
-const { sleep } = require('../helpers/utils');
+const { sleep, arraysEqualUnordered } = require('../helpers/utils');
 
 const GameStatus = Object.freeze({
     ACTIVE: "active",      // гра відкрита, показуємо всі кнопки
@@ -500,7 +500,24 @@ class Database {
         const cacheKey = `chatSettings:${chatId}`;
         return await this.cache.getOrSet(
             cacheKey,
-            async () => await this.chatSettingsCollection().findOne({ chatId }),
+            async () => {
+                const chatSettings = await this.chatSettingsCollection().findOne({ chatId });
+                if (this.bot) {
+                    try {
+                        const adminsRaw = await this.bot.getChatAdmins(chatId);
+                        // console.log(adminsRaw);
+                        const admins = adminsRaw.map(item => { return { ...item.user, status: item.status }; });
+                        const isUpdateNeeded = !arraysEqualUnordered(admins, chatSettings.admins || []);
+                        // console.log(admins);
+                        chatSettings.admins = admins;
+                        if (isUpdateNeeded)
+                            this.updateChatSettings({ chatId, admins: admins});
+                    } catch (error) {
+                        console.error(error);
+                    }
+                }
+                return chatSettings;
+            },
             this.ttlChatSettingsMs
         );
     }
@@ -586,6 +603,16 @@ class Database {
                 returnDocument: 'after' // ВАЖЛИВО: кажемо повернути документ ПІСЛЯ оновлення
             }
         );
+    }
+
+    // Auxiliary function
+    async getSettingsByChatId(chatId) {
+        if (chatId < 0) {
+            const chatSettings = await this.getChatSettings(chatId) || {};
+            return chatSettings.settings || {};
+        }
+        const user = await this.getUserFromDB(chatId);
+        return user.settings || {};
     }
 }
 

@@ -368,6 +368,13 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const isDate = (date) => date instanceof Date && !isNaN(date);
 
+const arraysEqualUnordered = (a1, a2) => {
+    if (a1.length !== a2.length) return false;
+    const s1 = a1.map(o => JSON.stringify(o)).sort();
+    const s2 = a2.map(o => JSON.stringify(o)).sort();
+    return s1.every((val, i) => val === s2[i]);
+}
+
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
     date.setDate(date.getDate() + days);
@@ -427,5 +434,6 @@ module.exports = {
     getDigitGroupCount,
     sleep,
     formatToTimeZone,
-    isDate
+    isDate,
+    arraysEqualUnordered
 };
