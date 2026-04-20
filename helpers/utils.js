@@ -217,18 +217,31 @@ function parseDateFromString(text) {
     // \d{1,2}     - 1 або 2 цифри для місяця
     // [.\-/]      - той самий набір роздільників
     // \d{2,4}     - від 2 до 4 цифр для року
-    const dateRegex = /\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})\b/g;
+    const dateRegex = /\b(\d{1,2})[\.\-/](\d{1,2})[\.\-/](\d{2,4})\b/g;
 
-    const matches = [...text.matchAll(dateRegex)];
+    let matches = [...text.matchAll(dateRegex)];
 
-    return matches.map(match => {
-        return {
+    if (matches.length > 0) {
+        return matches.map(match => ({
             fullDate: match[0],
             day: match[1],
             month: match[2],
             year: match[3]
-        };
-    });
+        }));
+    }
+
+    // Если не найдено, ищем строго dd.mm (например 1.04, 22.04, 31.11)
+    const dateRegexShort = /\b(\d{1,2})\.(\d{1,2})\b/g;
+
+    matches = [...text.matchAll(dateRegexShort)].filter(match => +match[1] <= 31 && +match[2] <= 12);
+    const currentYear = new Date().getFullYear();
+
+    return matches.map(match => ({
+        fullDate: `${match[0]}.${currentYear}`, // добавляем год к строке
+        day: match[1],
+        month: match[2],
+        year: String(currentYear)
+    }));
 }
 
 const extractDate = (str) => {
