@@ -22,7 +22,8 @@ const {
     sleep,
     formatToTimeZone,
     isDate,
-    truncateString
+    truncateString,
+    unescapeString
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
 const { GameStatus } = require('./Database');
@@ -1165,6 +1166,7 @@ class Bot {
                 dateText = ` (${dateText.split(' ')[0]})`;
         }
         let gameText = '';
+        let sectionSeparator = unescapeString(chatSettings?.settings?.sectionSeparator || '');
         if (game.subgames && game.subgames.length > 1) {
             for (let ind = 0, n = game.subgames.length; ind < n; ind++) {
                 let subgame = game.subgames[ind];
@@ -1172,17 +1174,17 @@ class Bot {
                 gameText +=
                 `🏆 ${subgame.name}\n` +
                 `👥 Кількість учасників ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).length}${subgame.maxPlayers ? '/' + subgame.maxPlayers : ''}\n` +
-                `✅ Йдуть: ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).slice(0, limit).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
-                `⏳ У черзі: ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).slice(limit).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
-                `❓ Думають: ${players.filter(p => p.status === 'pending' && p.subgameIndex === ind).map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
-                `❌ Не йдуть: ${players.filter(p => p.status === 'declined' && p.subgameIndex === ind).map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n${separator}`;
+                `${sectionSeparator}✅ Йдуть: ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).slice(0, limit).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
+                `${sectionSeparator}⏳ У черзі: ${players.filter(p => p.status === 'joined' && p.subgameIndex === ind).slice(limit).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
+                `${sectionSeparator}❓ Думають: ${players.filter(p => p.status === 'pending' && p.subgameIndex === ind).map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
+                `${sectionSeparator}❌ Не йдуть: ${players.filter(p => p.status === 'declined' && p.subgameIndex === ind).map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n${separator}`;
             }
         } else {
             gameText += `👥 Кількість учасників ${players.filter(p => p.status === 'joined').length}${game.maxPlayers ? '/' + game.maxPlayers : ''}\n` +
-            `✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, limit).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
-            `⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(limit).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
-            `❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
-            `❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n\n`;
+            `${sectionSeparator}✅ Йдуть: ${players.filter(p => p.status === 'joined').slice(0, limit).map(p => `\n✅ ${m(p)}`).join(', ') || '-'}\n` +
+            `${sectionSeparator}⏳ У черзі: ${players.filter(p => p.status === 'joined').slice(limit).map(p => `\n⏳ ${m(p)}`).join(', ') || '-'}\n` +
+            `${sectionSeparator}❓ Думають: ${players.filter(p => p.status === 'pending').map(p => `\n❓ ${m(p)}`).join(', ') || '-'}\n` +
+            `${sectionSeparator}❌ Не йдуть: ${players.filter(p => p.status === 'declined').map(p => `\n❌ ${m(p)}`).join(', ') || '-'}\n\n`;
         }
         let topText = ''
         if (game.status === GameStatus.INACTIVE) topText = '‼️ ГРА НЕАКТИВНА ‼️\n\n';
@@ -1190,9 +1192,8 @@ class Bot {
         else if (game.status === GameStatus.DELETED) topText = '‼️ ГРА ВИДАЛЕНА ‼️\n\n';
         return textMarkdownNormalize(
             topText +
-            `📅 ${game.name}${dateText}\n\n` + gameText +
-            `✍️ Опубліковано ${game.createdByName}`
-        );
+            `📅 ${game.name}${dateText}\n\n` + gameText
+        ) + `✍️ _Опубліковано ${game.createdByName}_`;
     }
 
     buildMarkup(game) {

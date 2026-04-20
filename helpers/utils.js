@@ -382,6 +382,11 @@ const truncateString = (str, maxLength) => {
     return str.slice(0, maxLength) + '...'; // иначе обрезаем и добавляем "..."
 }
 
+const unescapeString = (str) => {
+    // Оборачиваем строку в кавычки и парсим как JSON
+    return JSON.parse(`"${str}"`);
+}
+
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
     date.setDate(date.getDate() + days);
@@ -443,5 +448,6 @@ module.exports = {
     formatToTimeZone,
     isDate,
     arraysEqualUnordered,
-    truncateString
+    truncateString,
+    unescapeString
 };
