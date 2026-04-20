@@ -21,7 +21,8 @@ const {
     getDigitGroupCount,
     sleep,
     formatToTimeZone,
-    isDate
+    isDate,
+    truncateString
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
 const { GameStatus } = require('./Database');
@@ -936,7 +937,7 @@ class Bot {
                 Markup.button.callback(this.emoji.edit + ' Нагадування', `editNotif_${gameId}`)*/
             ]
         ]);
-        this.replyToUserDirectOrDoNothing(ctx, `Гра: ${game.name}`, markup);
+        this.replyToUserDirectOrDoNothing(ctx, `Гра: ${truncateString(game.name, 150)}`, markup);
     }
 
     async handleShowSettings(ctx) {
@@ -1150,7 +1151,7 @@ class Bot {
         const players = game.players || [];
         const m = (user) => {
             const extra = (user.extraPlayer ? ' (+)' : '');
-            return `[${user.fullName || user.name}${extra}](tg://user?id=${user.id})`;
+            return `[${truncateString(user.fullName || user.name, 28)}${extra}](tg://user?id=${user.id})`;
         };
         const limit = game.maxPlayers || Infinity;
         //const dateText = game.date ? ` (${date2text(game.date)})` : '';

@@ -375,6 +375,13 @@ const arraysEqualUnordered = (a1, a2) => {
     return s1.every((val, i) => val === s2[i]);
 }
 
+const truncateString = (str, maxLength) => {
+    if (str.length <= maxLength) {
+        return str; // если строка короче или равна лимиту, возвращаем её целиком
+    }
+    return str.slice(0, maxLength) + '...'; // иначе обрезаем и добавляем "..."
+}
+
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
     date.setDate(date.getDate() + days);
@@ -435,5 +442,6 @@ module.exports = {
     sleep,
     formatToTimeZone,
     isDate,
-    arraysEqualUnordered
+    arraysEqualUnordered,
+    truncateString
 };
