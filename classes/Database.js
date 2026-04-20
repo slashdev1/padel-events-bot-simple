@@ -44,6 +44,9 @@ class Database {
         this.db = this.client.db(this.dbName);
         console.log(`Connected to MongoDB (db ${this.dbName})`);
         await this.ensureGamePlayersIndexes();
+
+        // const chatSettings = await this.chatSettingsCollection().findOne({ chatId: -5175576414 })
+        // console.log(JSON.stringify(chatSettings));
     }
 
     async disconnect() {
@@ -498,11 +501,13 @@ class Database {
     // Chat settings operations
     async getChatSettings(chatId) {
         const cacheKey = `chatSettings:${chatId}`;
+        // console.log('getChatSettings', chatId);
         return await this.cache.getOrSet(
             cacheKey,
             async () => {
                 const chatSettings = await this.chatSettingsCollection().findOne({ chatId });
-                if (this.bot) {
+                // console.log('getChatSettings/async ()', chatId, chatSettings, this.bot);
+                if (chatSettings && this.bot) {
                     try {
                         const adminsRaw = await this.bot.getChatAdmins(chatId);
                         // console.log(adminsRaw);
@@ -524,6 +529,7 @@ class Database {
 
     async createChatSettings(chatSettings) {
         const result = await this.chatSettingsCollection().insertOne(chatSettings);
+        // console.log('createChatSettings', chatSettings);
         if (chatSettings && chatSettings.chatId) {
             const cacheKey = `chatSettings:${chatSettings.chatId}`;
             this.cache.set(cacheKey, chatSettings, this.ttlChatSettingsMs);
@@ -534,6 +540,7 @@ class Database {
     async updateChatSettings(chatSettings, fnMakeChatSettings) {
         const { chatId } = chatSettings;
         const chatSettingsFromDB = await this.getChatSettings(chatId);
+        // console.log('updateChatSettings', chatId, chatSettings, chatSettingsFromDB, typeof fnMakeChatSettings);
         if (chatSettingsFromDB) {
             const updateData = { ...chatSettingsFromDB, ...chatSettings, updatedDate: new Date() };
             await this.chatSettingsCollection().updateOne({ chatId }, { $set: updateData });

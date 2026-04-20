@@ -1302,6 +1302,7 @@ class Bot {
 
     async getOrCreateChatSettings(ctx, chatId) {
         let chatSettings = await this.database.getChatSettings(chatId);
+        // console.log('getOrCreateChatSettings', chatId, chatSettings);
         if (!chatSettings && this.isGroup(chatId)) {
             chatSettings = await this.makeChatSettings(chatId, ctx);
             await this.database.createChatSettings(chatSettings);
@@ -1524,7 +1525,7 @@ class Bot {
             license: config.license,
             botStatus: 'unknown',
             reminders: [],
-            admins: [],
+            admins: await this.getChatAdmins(chatId), // [],
             permissions: this.getDefaultPermissions(config.license),
             features: [],
             settings: {
@@ -1613,10 +1614,11 @@ class Bot {
     updateChatStatus(chatId, status, ctx) {
         const needToSetDefaultSettings = status === 'member';
         if (this.isGroup(chatId)) {
-            this.database.updateChatSettings({ chatId, botStatus: status }, needToSetDefaultSettings ? async () => await this.makeChatSettings(chatId, ctx) : null);
+            const fnMakeChatSettings = needToSetDefaultSettings ? async () => await this.makeChatSettings(chatId, ctx) : null;
+            // console.log('updateChatStatus', chatId, status, needToSetDefaultSettings, fnMakeChatSettings);
+            this.database.updateChatSettings({ chatId, botStatus: status }, fnMakeChatSettings);
             if (needToSetDefaultSettings) this.replyOrDoNothing(ctx, 'Привіт!\nДякую за додавання мене до групи.\n\nЩоб дізнатися що я вмію відправьте команду /help.');
-        }
-        else {
+        } else {
             const started = status === 'member';
             this.database.updateUser({ id: chatId, started, ...(needToSetDefaultSettings ? { settings: this.getDefaultSettings(false) } : {}), ...(started ? ctx.from : {}) });
         }
