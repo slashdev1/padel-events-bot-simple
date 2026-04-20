@@ -562,8 +562,9 @@ class Bot {
     }
 
     async handleRefreshGameMessage(ctx) {
-        let [_, ...args] = parseArgs(ctx.message.text);
-        if (args.length != 1) return await this.sendMessage(userId, this.emoji.warn + 'Передана некоректа кількість параметрів.');
+        let [cmdName, ...args] = parseArgs(ctx.message.text);
+        if (args.length != 1)
+            return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
 
         const str = args[0];
         const isHex = /^[0-9a-fA-F]+$/.test(str);
@@ -1629,7 +1630,7 @@ class Bot {
     replyWarning(ctx, cmdName, warnText) {
         return this.replyOrDoNothing(
             ctx,
-            this.emoji.warn + warnText + ' ' + (this.botCommands[cmdName].example || '')
+            this.emoji.warn + warnText + ' ' + (this.botCommands[cmdName]?.example || '')
         );
     }
 
