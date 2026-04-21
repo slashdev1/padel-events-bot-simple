@@ -1287,7 +1287,7 @@ class Bot {
 
         const fnEditMessage = (game.photoId ? this.bot.telegram.editMessageCaption : this.bot.telegram.editMessageText).bind(this.bot.telegram);
         try {
-            fnEditMessage(
+            await fnEditMessage(
                 game.chatId,
                 game.messageId,
                 null,
@@ -1702,7 +1702,7 @@ class Bot {
                 }
                 subgames.push({ name, maxPlayers: parseInt(params[`p${i}`]) || null, date, isDateWithoutTime });
             }
-            return subgames;
+            return subgames.length === 1 ? [] : subgames;
         }
 
         const convertStringDate = (stringDate, name) => {
