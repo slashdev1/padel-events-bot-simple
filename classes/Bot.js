@@ -45,6 +45,7 @@ class Bot {
         this.setupMyChatMember();
         this.setupChatMembers();
         this.setupTextHandler();
+        this.setupPhotoHandler();
     }
 
     // Для кнопок з вводом тексту
@@ -167,7 +168,10 @@ class Bot {
 
     setupTextHandler() {
         this.bot.on('text', async (ctx) => {
-            console.log(`Повідомлення від ${extractUserTitle(ctx.from)} (id=${this.getUserId(ctx)}): ` + ctx.message.text);
+            let extra = '';
+            if (this.isGroup(ctx))
+                extra = ' у групі ' + ctx.chat.title;
+            console.log(`Повідомлення від ${extractUserTitle(ctx.from)} (id=${this.getUserId(ctx)})${extra}: ` + ctx.message.text);
 
             const input = this.waitingInput[ctx.from.id];
             if (!input) return;
@@ -197,6 +201,19 @@ class Bot {
                 this.handleSettingsSetNotificationTerms(ctx, messageId);
             }
             delete(this.waitingInput[ctx.from.id]);
+        });
+    }
+
+    setupPhotoHandler() {
+        this.bot.on('photo', async (ctx) => {
+            const caption = ctx.message.caption;
+            console.log('photo, caption='+caption);
+            if (!caption)
+                return;
+            if (caption.startsWith('/game')) {
+                ctx.message.text = caption;
+                return this.handleAddGame(ctx);
+            }
         });
     }
 
@@ -296,6 +313,8 @@ class Bot {
         const creatorId = this.getUserId(ctx);
         const creatorName = extractUserTitle(ctx.from, false);
         const chatName = ctx.chat.title;
+        const photos = ctx.message.photo;
+        const photoId = photos ? photos[photos.length - 1].file_id : null;
 
         const game = {
             createdById: creatorId,
@@ -308,11 +327,13 @@ class Bot {
             isDateWithoutTime,
             maxPlayers,
             players: [],
-            subgames
+            subgames,
+            photoId
         };
         console.log(`Now ${new Date()}`);
         console.log(`Converted Date ${game.date}`);
         console.log(`Game ${game.name}`);
+        console.log(`Game photo ${game.photoId}`);
 
         const gameId = await this.database.createGame(game);
         const message = await this.writeGameMessage(ctx, game);
@@ -1261,10 +1282,12 @@ class Bot {
         if (!game) return;
 
         const chatSettings = await this.database.getChatSettings(game.chatId);
-        if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member'))  return console.error(`Важливо (updateGameMessage): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
+        if (!chatSettings || (chatSettings.botStatus && chatSettings.botStatus !== 'member'))
+            return console.error(`Важливо (updateGameMessage): бот не є членом групи ${chatSettings.chatName} (id=${game.chatId})`);
 
+        const fnEditMessage = (game.photoId ? this.bot.telegram.editMessageCaption : this.bot.telegram.editMessageText).bind(this.bot.telegram);
         try {
-            return await this.bot.telegram.editMessageText(
+            fnEditMessage(
                 game.chatId,
                 game.messageId,
                 null,
@@ -1284,7 +1307,16 @@ class Bot {
         if (!game) return;
 
         const chatSettings = await this.database.getChatSettings(game.chatId);
-        return await this.replyOrDoNothing(
+        if (game.photoId) {
+            return /*await*/ ctx.replyWithPhoto(
+                game.photoId,
+                {
+                    caption: this.buildTextMessage(game, chatSettings),
+                    ...this.getGameMessageOptions(game)
+                }
+            );
+        }
+        return /*await*/ this.replyOrDoNothing(
             ctx,
             this.buildTextMessage(game, chatSettings),
             this.getGameMessageOptions(game)
