@@ -241,7 +241,7 @@ class Database {
 
         const filter = {
             //isActive: true,
-            status: GameStatus.ACTIVE,
+            status: { $ne: GameStatus.EXPIRED },
             $or: [
                 // 1. Якщо є хоча б одна підгра з датою (дата гри у такому випадку не має значення), і ВСІ такі дати вже в минулому
                 {
@@ -322,7 +322,7 @@ class Database {
                             await this.bot.updateGameMessage(game, gameId);
                         }
                     } finally {
-                        await sleep(100);
+                        await sleep(200);
                     }
                 }
             }

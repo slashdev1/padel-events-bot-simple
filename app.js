@@ -51,7 +51,7 @@ class PadelBotApp {
             this.bot.setBotInfo(data.username, `https://t.me/${data.username}`);
             console.log(data.username, `https://t.me/${data.username}`);
 
-            // this.database.deactivateExpiredGames();
+            this.database.deactivateExpiredGames();
         };
 
         let config = this.config.botConfig;
