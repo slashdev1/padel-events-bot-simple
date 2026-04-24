@@ -301,7 +301,7 @@ class Bot {
 
         const msgText = ctx.message.text;
         let [cmdName, ...args] = str2params(msgText);
-        cmdName = cmdName.slice(1);
+        cmdName = this._cmd(cmdName);
 
         const chatSettings = await this.database.getChatSettings(chatId) || {};
         if (!await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, cmdName, chatSettings))
@@ -346,7 +346,7 @@ class Bot {
     async handleDelGame(ctx) {
         // Важливо: ця команда може запускатись не з групи а напряму боту, тому айді чата береться з гри
         let [cmdName, ...args] = str2params(ctx.message.text);
-        cmdName = cmdName.slice(1);
+        cmdName = this._cmd(cmdName);
 
         if (args.length < 1) return this.replyWarning(ctx, cmdName, 'Не переданий ідентифікатор гри.');
 
@@ -376,7 +376,7 @@ class Bot {
     async handleChangeGame(ctx) {
         // Важливо: ця команда може запускатись не з групи а напряму боту, тому айді чата береться з гри
         let [cmdName, ...args] = str2params(ctx.message.text);
-        cmdName = cmdName.slice(1);
+        cmdName = this._cmd(cmdName);
 
         if (args.length < 2) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
 
@@ -449,7 +449,7 @@ class Bot {
     async handleKickFromGame(ctx) {
         // Важливо: ця команда може запускатись не з групи а напряму боту, тому айді чата береться з гри
         let [cmdName, ...args] = str2params(ctx.message.text);
-        cmdName = cmdName.slice(1);
+        cmdName = this._cmd(cmdName);
 
         if (args.length < 2) return this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.');
 
@@ -544,7 +544,7 @@ class Bot {
 
         const msgText = ctx.message.text;
         let [cmdName, ...args] = str2params(msgText);
-        cmdName = cmdName.slice(1);
+        cmdName = this._cmd(cmdName);
 
         const markup = this.getMarkupForSettings(chatId);
         const msg = this.buildTextMessageOfCurrentSettings(settings, chatId, ctx.chat.title);
@@ -1851,6 +1851,10 @@ class Bot {
         if (this.isGroup(chatId))
             buttons.push([Markup.button.callback(this.emoji.access + ' Змінити права та доступ', `permissions_${chatId}`)]);
         return Markup.inlineKeyboard(buttons);
+    }
+
+    _cmd(cmdName) {
+        return cmdName.slice(1).split('@')[0];
     }
 }
 
