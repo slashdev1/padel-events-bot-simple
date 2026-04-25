@@ -359,7 +359,9 @@ class Database {
                     subgames: 1,
                     timezone: '$chatSettings.timezone',
                     notificationTerms: '$chatSettings.notificationTerms',
-                    license: '$chatSettings.license'
+                    license: '$chatSettings.license',
+                    photoId: 1,
+                    videoId: 1
                 }
             }
         ]).toArray();

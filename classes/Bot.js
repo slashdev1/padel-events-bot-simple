@@ -354,7 +354,7 @@ class Bot {
         console.log(`Converted Date ${game.date}`);
         console.log(`Game ${game.name}`);
         console.log(`Game photo ${game.photoId}`);
-        console.log(`Game vedeo ${game.videoId}`);
+        console.log(`Game video ${game.videoId}`);
 
         const gameId = await this.database.createGame(game);
         const message = await this.writeGameMessage(ctx, game);
