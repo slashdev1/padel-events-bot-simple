@@ -772,6 +772,12 @@ class Bot {
         return max;
     }
 
+    saveVoteHistoryEvent(payload) {
+        this.database.insertGameVoteHistory(payload).catch((error) => {
+            console.error('Failed to save vote history event:', error);
+        });
+    }
+
     async updateGameStatus(ctx, action) {
         const [fullGameId, extraAction] = ctx.match[1].split('_');
         const [gameId, subgameIndex] = fullGameId.split('/');
@@ -809,7 +815,21 @@ class Bot {
                 if (playerInd < 0) {
                     return this.showPopup(ctx, this.emoji.warn + 'Запис не знайдено.');
                 }
-                await this.database.deleteGamePlayerSlot(gid, game.players[playerInd]);
+                const removedSlot = game.players[playerInd];
+                await this.database.deleteGamePlayerSlot(gid, removedSlot);
+                this.saveVoteHistoryEvent({
+                    gameId: gid,
+                    chatId: game.chatId,
+                    userId,
+                    username,
+                    fullName,
+                    subgameIndex: subgameIndexNum,
+                    extraPlayer: removedSlot.extraPlayer ?? 0,
+                    action: 'extra_minus',
+                    prevStatus: removedSlot.status,
+                    newStatus: null,
+                    timestamp
+                });
             } else {
                 extraPlayer++;
                 const inserted = await this.database.insertGamePlayer(gid, {
@@ -829,6 +849,19 @@ class Bot {
                     }
                     return this.showPopup(ctx, this.emoji.err + 'Не вдалося додати ігрока.');
                 }
+                this.saveVoteHistoryEvent({
+                    gameId: gid,
+                    chatId: game.chatId,
+                    userId,
+                    username,
+                    fullName,
+                    subgameIndex: subgameIndexNum,
+                    extraPlayer,
+                    action: 'extra_plus',
+                    prevStatus: null,
+                    newStatus,
+                    timestamp
+                });
             }
         } else {
             if (playerInd >= 0) {
@@ -842,11 +875,25 @@ class Bot {
                     if (conflict) return this.showPopup(ctx, conflict);
                 }
                 const slot = game.players[playerInd];
+                const prevStatus = slot.status;
                 await this.database.updateGamePlayerSlot(gid, slot, {
                     status: newStatus,
                     timestamp,
                     name: username,
                     fullName: fullName
+                });
+                this.saveVoteHistoryEvent({
+                    gameId: gid,
+                    chatId: game.chatId,
+                    userId,
+                    username,
+                    fullName,
+                    subgameIndex: subgameIndexNum,
+                    extraPlayer: slot.extraPlayer ?? 0,
+                    action: 'status_change',
+                    prevStatus,
+                    newStatus,
+                    timestamp
                 });
             } else {
                 const conflict = this.checkSubgameSignupConflict(game, chatSettings, userId, subgameIndex, newStatus);
@@ -870,6 +917,19 @@ class Bot {
                     return this.showPopup(ctx, this.emoji.warn + 'Ваш запис уже оновлено. Оновіть повідомлення гри.');
                 }
                 if (!inserted.ok) return this.showPopup(ctx, this.emoji.err + 'Не вдалося записати на гру.');
+                this.saveVoteHistoryEvent({
+                    gameId: gid,
+                    chatId: game.chatId,
+                    userId,
+                    username,
+                    fullName,
+                    subgameIndex: subgameIndexNum,
+                    extraPlayer: 0,
+                    action: 'status_create',
+                    prevStatus: null,
+                    newStatus,
+                    timestamp
+                });
             }
         }
 

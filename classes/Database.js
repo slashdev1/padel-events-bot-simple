@@ -44,6 +44,7 @@ class Database {
         this.db = this.client.db(this.dbName);
         console.log(`Connected to MongoDB (db ${this.dbName})`);
         await this.ensureGamePlayersIndexes();
+        await this.ensureGameVoteHistoryIndexes();
 
         // const chatSettings = await this.chatSettingsCollection().findOne({ chatId: -5175576414 })
         // console.log(JSON.stringify(chatSettings));
@@ -83,6 +84,10 @@ class Database {
         return this.db.collection('gamePlayers');
     }
 
+    gameVoteHistoryCollection() {
+        return this.db.collection('gamePlayerVotesHistory');
+    }
+
     _id(id) {
         return typeof id === 'string' ? ObjectId.createFromHexString(id) : id;
     }
@@ -112,6 +117,13 @@ class Database {
             { unique: true, name: 'gamePlayer_unique_slot' }
         );
         await coll.createIndex({ gameId: 1, timestamp: 1 }, { name: 'gamePlayer_by_game_time' });
+    }
+
+    async ensureGameVoteHistoryIndexes() {
+        if (!this.db) return;
+        const coll = this.gameVoteHistoryCollection();
+        await coll.createIndex({ gameId: 1, timestamp: -1 }, { name: 'voteHistory_by_game_time' });
+        await coll.createIndex({ userId: 1, timestamp: -1 }, { name: 'voteHistory_by_user_time' });
     }
 
     async getGamePlayers(gameId) {
@@ -173,6 +185,23 @@ class Database {
             extraPlayer: slot.extraPlayer ?? 0,
             subgameIndex: slot.subgameIndex ?? 0
         });
+    }
+
+    async insertGameVoteHistory(event) {
+        const doc = {
+            gameId: this._id(event.gameId),
+            chatId: event.chatId,
+            userId: event.userId,
+            username: event.username,
+            fullName: event.fullName,
+            subgameIndex: event.subgameIndex ?? 0,
+            extraPlayer: event.extraPlayer ?? 0,
+            action: event.action,
+            prevStatus: event.prevStatus ?? null,
+            newStatus: event.newStatus ?? null,
+            timestamp: event.timestamp instanceof Date ? event.timestamp : new Date()
+        };
+        await this.gameVoteHistoryCollection().insertOne(doc);
     }
 
     async kickUserFromAllGameSlots(gameId, userId) {
