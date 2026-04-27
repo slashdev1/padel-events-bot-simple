@@ -105,7 +105,9 @@ class Database {
             extraPlayer: doc.extraPlayer ?? 0,
             status: doc.status,
             timestamp: doc.timestamp,
-            subgameIndex: doc.subgameIndex ?? 0
+            subgameIndex: doc.subgameIndex ?? 0,
+            prevStatus: doc.prevStatus,
+            action: doc.action
         };
     }
 
@@ -185,23 +187,6 @@ class Database {
             extraPlayer: slot.extraPlayer ?? 0,
             subgameIndex: slot.subgameIndex ?? 0
         });
-    }
-
-    async insertGameVoteHistory(event) {
-        const doc = {
-            gameId: this._id(event.gameId),
-            chatId: event.chatId,
-            userId: event.userId,
-            username: event.username,
-            fullName: event.fullName,
-            subgameIndex: event.subgameIndex ?? 0,
-            extraPlayer: event.extraPlayer ?? 0,
-            action: event.action,
-            prevStatus: event.prevStatus ?? null,
-            newStatus: event.newStatus ?? null,
-            timestamp: event.timestamp instanceof Date ? event.timestamp : new Date()
-        };
-        await this.gameVoteHistoryCollection().insertOne(doc);
     }
 
     async kickUserFromAllGameSlots(gameId, userId) {
@@ -641,6 +626,33 @@ class Database {
                 returnDocument: 'after' // ВАЖЛИВО: кажемо повернути документ ПІСЛЯ оновлення
             }
         );
+    }
+
+    // gamePlayerVotesHistory
+    async getVotesHistory(gameId) {
+        const oid = this._id(gameId);
+        const rows = await this.gameVoteHistoryCollection()
+            .find({ gameId: oid })
+            .sort({ timestamp: 1 })
+            .toArray();
+        return rows.map((d) => this._publicGamePlayer({ ...d, id: d.userId, name: d.username, status: d.newStatus }));
+    }
+
+    async insertGameVoteHistory(event) {
+        const doc = {
+            gameId: this._id(event.gameId),
+            chatId: event.chatId,
+            userId: event.userId,
+            username: event.username,
+            fullName: event.fullName,
+            subgameIndex: event.subgameIndex ?? 0,
+            extraPlayer: event.extraPlayer ?? 0,
+            action: event.action,
+            prevStatus: event.prevStatus ?? null,
+            newStatus: event.newStatus ?? null,
+            timestamp: event.timestamp instanceof Date ? event.timestamp : new Date()
+        };
+        await this.gameVoteHistoryCollection().insertOne(doc);
     }
 
     // Auxiliary function

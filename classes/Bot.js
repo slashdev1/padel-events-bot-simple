@@ -85,6 +85,7 @@ class Bot {
         this.bot.action(/^edit_game_maxPlayers_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'players'));
         this.bot.action(/^edit_game_date_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'date'));
         this.bot.action(/^edit_game_name_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'name'));
+        this.bot.action(/^show_votes_history_(.*)$/, (ctx) => this.handleShowVotesHistory(ctx));
 
         this.bot.action(/^settings_(.*)$/, (ctx) => this.handleShowSettings(ctx));
         this.bot.action(/^back_to_settings_(.*)$/, (ctx) => this.handleBackToShowSettings(ctx));
@@ -966,6 +967,45 @@ class Bot {
         this.showPopup(ctx, this.emoji.info + 'Гру закрито.');
     }
 
+    async handleShowVotesHistory(ctx) {
+        const gameId = ctx.match[1].split('_')[0];
+        const game = await this.database.getGame(gameId);
+        if (!game) return this.showPopup(ctx, this.emoji.notfound + 'Гру не знайдено.');
+        if (game.createdDate < Date.UTC(2026, 3, 26, 23, 59, 59)) return this.showPopup(ctx, this.emoji.warn + 'Для цієї гри ще не велась історія.', true);
+
+        const votesHistory = await this.database.getVotesHistory(gameId);
+        if (votesHistory.length === 0) return this.showPopup(ctx, this.emoji.warn + 'Немає жодного голосу.');
+        // console.log(votesHistory);
+
+        const chatSettings = await this.database.getChatSettings(game.chatId);
+        const timezone = chatSettings?.settings?.timezone || this.getDefaultSettings().timezone;
+        const status2emoji = (status) => {
+            if (status === 'joined') return '✅'
+            if (status === 'declined') return '❌'
+            if (status === 'pending') return '❓'
+            if (status === 'kicked') return this.emoji.kick
+        }
+        let msg = 'Історія голосів:';
+        let directJoined = 0;
+        let extraJoined = 0;
+        for (const item of votesHistory) {
+            let dateText = formatToTimeZone(item.timestamp, timezone, true);
+            let extra = '';
+            if (item.action === 'extra_minus') extra = '➖', extraJoined--;
+            else if (item.action === 'extra_plus') extra = '➕', extraJoined++;
+            else {
+                if (item.prevStatus) extra = status2emoji(item.prevStatus) + '->';
+                extra += status2emoji(item.status);
+                if (item.status === 'joined') directJoined++;
+                if (item.prevStatus === 'joined') directJoined--;
+            }
+            msg += `\n${dateText}, ${this._getUserPresentation(item)} ${extra}`
+        }
+        // console.log(msg);
+        msg += '—'.repeat(18) + `\nКількість учасників ${directJoined + extraJoined}${game.maxPlayers ? '/' + game.maxPlayers : ''}, з них\n  ✅ ${directJoined}\n  ➕ ${extraJoined}`;
+        this.replyOrDoNothing(ctx, msg, { parse_mode: 'Markdown' });
+    }
+
     async _getAndCheckGameForActivation(ctx) {
         const cmdName = 'change_game';
         const gameId = ctx.match[1].split('_')[0];
@@ -1031,6 +1071,9 @@ class Bot {
             [
                 Markup.button.callback('⏸️ Закрити игру', `disactivate_${gameId}`),
                 Markup.button.callback('▶️ Відкрити гру', `activate_${gameId}`)
+            ],
+            [
+                Markup.button.callback('🗳️ Історія голосів', `show_votes_history_${gameId}`)
             ],
             [
                 Markup.button.callback(this.emoji.edit + ' К-ть гравців', `edit_game_maxPlayers_${gameId}`),
@@ -1255,7 +1298,7 @@ class Bot {
         const players = game.players || [];
         const m = (user) => {
             const extra = (user.extraPlayer ? ' (+)' : '');
-            return `[${truncateString(user.fullName || user.name, 28)}${extra}](tg://user?id=${user.id})`;
+            return this._getUserPresentation(user, extra);
         };
         const limit = game.maxPlayers || Infinity;
         //const dateText = game.date ? ` (${date2text(game.date)})` : '';
@@ -1945,6 +1988,10 @@ class Bot {
 
     _cmd(cmdName) {
         return cmdName.slice(1).split('@')[0];
+    }
+
+    _getUserPresentation(user, extra = '') {
+        return `[${truncateString(user.fullName || user.name, 28)}${extra || ''}](tg://user?id=${user.id})`;
     }
 }
 

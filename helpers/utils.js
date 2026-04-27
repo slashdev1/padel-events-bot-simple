@@ -116,8 +116,8 @@ const convertTZ = (date, tzString) => {
     return new Date((typeof date === 'string' || typeof date === 'number' ? new Date(date) : date).toLocaleString('en-US', { timeZone: tzString }));
 }
 
-const formatToTimeZone = (date, timeZone) => {
-    return new Intl.DateTimeFormat('uk-UA', {
+const formatToTimeZone = (date, timeZone, showSeconds = false) => {
+    const options = {
         timeZone: timeZone,
         day: '2-digit',
         month: '2-digit',
@@ -125,7 +125,14 @@ const formatToTimeZone = (date, timeZone) => {
         hour: '2-digit',
         minute: '2-digit',
         hour12: false // формат 24г
-    }).format(date).replace(',', ''); // Прибираємо кому, якщо вона з'явиться
+    };
+    if (showSeconds) {
+        options.second = '2-digit';
+    }
+
+    return new Intl.DateTimeFormat('uk-UA', options)
+        .format(date)
+        .replace(',', '');
 }
 
 const parseDate = (str, timezoneOrOffset) => {
