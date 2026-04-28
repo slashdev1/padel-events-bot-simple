@@ -82,6 +82,7 @@ class Bot {
 
         this.bot.action(/^activate_(.*)$/, (ctx) => this.handleGameOpening(ctx));
         this.bot.action(/^disactivate_(.*)$/, (ctx) => this.handleGameClosing(ctx));
+        this.bot.action(/^pause_(.*)$/, (ctx) => this.handleGamePausing(ctx));
         this.bot.action(/^edit_game_maxPlayers_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'players'));
         this.bot.action(/^edit_game_date_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'date'));
         this.bot.action(/^edit_game_name_(.*)$/, (ctx) => this.handleGameChanging(ctx, 'name'));
@@ -944,9 +945,9 @@ class Bot {
         const game = await this._getAndCheckGameForActivation(ctx);
         if (!game?._id) return;
 
-        const status = game.status === GameStatus.ACTIVE ? GameStatus.INACTIVE : GameStatus.ACTIVE;
+        const status = game.status === GameStatus.ACTIVE ? GameStatus.PAUSED : GameStatus.ACTIVE;
         this._setGameStatus(game, status);
-        this.showPopup(ctx, this.emoji.info + 'Гру ' + (status === GameStatus.ACTIVE ? 'відкрито.' : 'закрито.'));
+        this.showPopup(ctx, this.emoji.info + 'Гру ' + (status === GameStatus.ACTIVE ? 'відкрито.' : ' поставлено на паузу.'));
     }
 
     async handleGameOpening(ctx) {
@@ -965,6 +966,15 @@ class Bot {
 
         this._setGameStatus(game, GameStatus.INACTIVE);
         this.showPopup(ctx, this.emoji.info + 'Гру закрито.');
+    }
+
+    async handleGamePausing(ctx) {
+        const game = await this._getAndCheckGameForActivation(ctx);
+        if (!game?._id) return false;
+        if (game.status === GameStatus.PAUSED) return this.showPopup(ctx, this.emoji.info + 'Гра вже на паузі.');
+
+        this._setGameStatus(game, GameStatus.PAUSED);
+        this.showPopup(ctx, this.emoji.info + 'Гру поставлено на паузу.');
     }
 
     async handleShowVotesHistory(ctx) {
@@ -1003,6 +1013,8 @@ class Bot {
         }
         // console.log(msg);
         msg += '—'.repeat(18) + `\nКількість учасників ${directJoined + extraJoined}${game.maxPlayers ? '/' + game.maxPlayers : ''}, з них\n  ✅ ${directJoined}\n  ➕ ${extraJoined}`;
+        msg = textMarkdownNormalize(msg);
+        console.log(msg);
         this.replyOrDoNothing(ctx, msg, { parse_mode: 'Markdown' });
     }
 
@@ -1069,7 +1081,8 @@ class Bot {
         // this.showPopup(ctx, this.emoji.info + ' Даний функціонал у розробці. Слідкуйте за оновленнями.');
         const markup = Markup.inlineKeyboard([
             [
-                Markup.button.callback('⏸️ Закрити игру', `disactivate_${gameId}`),
+                Markup.button.callback('⏸️ На паузу гру', `pause_${gameId}`),
+                Markup.button.callback('⏹️ Закрити гру', `disactivate_${gameId}`),
                 Markup.button.callback('▶️ Відкрити гру', `activate_${gameId}`)
             ],
             [
@@ -1335,6 +1348,7 @@ class Bot {
         let topText = ''
         if (game.status === GameStatus.INACTIVE) topText = '‼️ ГРА НЕАКТИВНА ‼️\n\n';
         else if (game.status === GameStatus.EXPIRED) topText = '‼️ ГРА ЗАКІНЧИЛАСЬ ‼️\n\n';
+        else if (game.status === GameStatus.PAUSED) topText = '‼️ ГРА НА ПАУЗІ ‼️\n\n';
         else if (game.status === GameStatus.DELETED) topText = '‼️ ГРА ВИДАЛЕНА ‼️\n\n';
         return textMarkdownNormalize(
             topText +
@@ -1343,15 +1357,16 @@ class Bot {
     }
 
     buildMarkup(game) {
-        if (!game || ![GameStatus.ACTIVE, GameStatus.INACTIVE].includes(game.status)) return null;
+        if (!game || ![GameStatus.ACTIVE, GameStatus.INACTIVE, GameStatus.PAUSED].includes(game.status)) return null;
 
         const gameId = game._id.toHexString();
         const buttons = [];
         buttons.push([
-            Markup.button.callback(/*game.isActive*/game.status === GameStatus.ACTIVE ? '⏸️ Закрити' : '▶️ Відкрити гру', `activation_${gameId}`),
+            Markup.button.callback(this.emoji.setup, `setup_${gameId}`),
+            //Markup.button.callback(/*game.isActive*/game.status === GameStatus.ACTIVE ? '⏸️ Пауза' : '▶️ Відкрити гру', `activation_${gameId}`),
             ...(/*game.isActive*/game.status === GameStatus.ACTIVE ? [
-                Markup.button.callback(this.emoji.notif + 'За 1 год.', `notification_${gameId}`),
-                Markup.button.callback(this.emoji.setup, `setup_${gameId}`)
+                Markup.button.callback(this.emoji.notif + 'За 1 год.', `notification_${gameId}`)/*,
+                Markup.button.callback(this.emoji.setup, `setup_${gameId}`)*/
             ] : []),
         ]);
         if (/*!game.isActive*/game.status !== GameStatus.ACTIVE) return Markup.inlineKeyboard(buttons);
@@ -1766,6 +1781,7 @@ class Bot {
         if (errorCode == 403) {
             // error?.response?.description: 'Forbidden: bot was kicked from the group chat'
             // error?.response?.description: 'Forbidden: bot was blocked by the user'
+            // error?.response?.description: 'Forbidden: bot can't initiate conversation with a user'
             const status = 'kicked/blocked';
             this.updateChatStatus(chatId, status);
             return;

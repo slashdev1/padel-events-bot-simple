@@ -7,7 +7,8 @@ const GameStatus = Object.freeze({
     ACTIVE: "active",      // гра відкрита, показуємо всі кнопки
     INACTIVE: "inactive",  // гра закрита вручну, показуємо лише "Відкрити гру"
     EXPIRED: "expired",    // гра закрита механізмом deactivateExpiredGames, не показуємо кнопки
-    DELETED: "deleted"
+    DELETED: "deleted",
+    PAUSED: "paused"
 });
 
 class Database {
