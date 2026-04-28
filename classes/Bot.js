@@ -122,11 +122,19 @@ class Bot {
             const chatId = ctx.chat.id;
             // Отримуємо назву чату (групи)
             const chatTitle = ctx.chat.title;
+            // ID текущего бота
+            const botId = ctx.botInfo.id;
+
             console.log(`Новий учасник у групі: ${chatTitle} (ID: ${chatId})`);
             newMembers.forEach((user) => {
                 const name = user.username ? `@${user.username}` : user.first_name;
                 //ctx.reply(`Вітаємо в групі, ${name}! 👋`);
                 console.log(`Новий користувач: ${name} (ID: ${user.id})`);
+                if (user.id === botId) {
+                    // Про всяк випадок оновимо статус бота у груповому чаті
+                    const newStatus = 'member';
+                    this.updateChatStatus(chatId, newStatus, ctx);
+                }
             });
         });
 
@@ -159,12 +167,19 @@ class Bot {
             const chatId = ctx.chat.id;
             // Отримуємо назву чату (групи)
             const chatTitle = ctx.chat.title;
+            // ID текущего бота
+            const botId = ctx.botInfo.id;
+
             console.log(`Учасник пішов з групи: ${chatTitle} (ID: ${chatId})`);
             const user = ctx.message.left_chat_member;
             const name = user.username ? `@${user.username}` : user.first_name;
 
             console.log(`Користувач пішов: ${name} (ID: ${user.id})`);
-
+            if (user.id === botId) {
+                // Про всяк випадок оновимо статус бота у груповому чаті
+                const newStatus = 'left';
+                this.updateChatStatus(chatId, newStatus, ctx);
+            }
             //ctx.reply(`${name} покинув чат. До зустрічі! 😢`);
         });
     }
@@ -274,13 +289,13 @@ class Bot {
     async handleTime(ctx) {
         const chatId = this.getChatId(ctx);
         const now = new Date();
-        let replyText = `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}\nЧасовий здвиг на сервері:\n${now.getTimezoneOffset()} хв.`;
+        let replyText = `Час на сервері:\n${now}\n${now.toISOString()}\n${now.toLocaleString()}`;
         const chatSettings = await this.database.getChatSettings(chatId);
         if (chatSettings) {
-            let parsedDate = normalizeParsedDate(now.getTime(), chatSettings.settings.timezone);
+            const timezone = this._getTimezone(chatSettings);
+            let parsedDate = normalizeParsedDate(now.getTime(), timezone);
             const clientNow = new Date(parsedDate);
-            replyText += `\n\nЧас у вас:\n${clientNow}\nЧасова зона/здвиг у вас:\n${chatSettings.settings.timezone}\n`;
-
+            replyText += `\n\nЧас у вас:\n${clientNow}\nЧасова зона у вас:\n${timezone}\n`;
         }
         this.replyToUserDirectOrDoNothing(ctx, replyText);
     }
@@ -452,7 +467,7 @@ class Bot {
                 const stringDate = supportedParams[key];
                 //const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
                 const chatSettings = await this.database.getChatSettings(game.chatId);
-                const parsedDate = parseDate(stringDate, chatSettings.settings.timezone);
+                const parsedDate = parseDate(stringDate, this._getTimezone(chatSettings));
                 if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.invalidDateFormatMessage);
                 game.date = updateData.date = new Date(parsedDate);
                 game.isDateWithoutTime = updateData.isDateWithoutTime = getDigitGroupCount(stringDate) < 4;
@@ -539,7 +554,7 @@ class Bot {
                     //let dateText = game.date ? `${date2text(game.date)}` : '';
                     // let chatSettings = await this.database.getChatSettings(game.chatId);
                     // let timezone = chatSettings?.timezone || this.getDefaultSettings().timezone;
-                    let timezone = game.timezone || this.getDefaultSettings().timezone;
+                    let timezone = this._getTimezone(game);
                     let dateText = '-';
                     if (gameDate) {
                         dateText = formatToTimeZone(gameDate, timezone);
@@ -645,7 +660,7 @@ class Bot {
                         gameDate = subgame.date;
                     }
 
-                    let timezone = game.timezone || this.getDefaultSettings().timezone;
+                    let timezone = this._getTimezone(game);
                     let dateText = '-';
                     if (gameDate) {
                         dateText = formatToTimeZone(gameDate, timezone);
@@ -713,7 +728,7 @@ class Bot {
     }
 
     subgameIntervalsOverlap(game, chatSettings, idxA, idxB) {
-        const tz = chatSettings?.settings?.timezone || this.getDefaultSettings().timezone;
+        const tz = this._getTimezone(chatSettings);
         const sgA = game.subgames[idxA];
         const sgB = game.subgames[idxB];
         if (!sgA || !sgB) return false;
@@ -988,7 +1003,7 @@ class Bot {
         // console.log(votesHistory);
 
         const chatSettings = await this.database.getChatSettings(game.chatId);
-        const timezone = chatSettings?.settings?.timezone || this.getDefaultSettings().timezone;
+        const timezone = this._getTimezone(chatSettings);
         const status2emoji = (status) => {
             if (status === 'joined') return '✅'
             if (status === 'declined') return '❌'
@@ -1317,7 +1332,7 @@ class Bot {
         //const dateText = game.date ? ` (${date2text(game.date)})` : '';
         let gameDate = game.date;
         //let chatSettings = await this.database.getChatSettings(game.chatId);
-        let timezone = chatSettings?.settings?.timezone || this.getDefaultSettings().timezone;
+        let timezone = this._getTimezone(chatSettings);
         let dateText = '';
         if (gameDate) {
             dateText = formatToTimeZone(gameDate, timezone);
@@ -1476,11 +1491,11 @@ class Bot {
     }
 
     parseDateByChatSettings(stringDate, chatSettings = {}) {
-        if (chatSettings.settings.timezone) {
+        if (chatSettings?.settings?.timezone) {
             const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T').replace(/T(\d):/, "T0$1:"); // T9:00 -> T09:00
             return Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.settings.timezone}]`).toInstant().toString();
         }
-        return parseDate(stringDate, chatSettings.settings.timezone);
+        return parseDate(stringDate, this.getDefaultSettings().timezone);
     }
 
     async getOrCreateChatSettings(ctx, chatId) {
@@ -1701,6 +1716,14 @@ class Bot {
 
     async makeChatSettings(chatId, ctx) {
         const config = this.getDefaultSettings();
+        let admins = [];
+        try {
+            const adminsRaw = await this.bot.getChatAdmins(chatId);
+            if (adminsRaw)
+                admins = adminsRaw.map(item => { return { ...item.user, status: item.status }; })
+        } catch (error) {
+            console.error(error);
+        }
         const chatSettings = {
             chatId,
             chatName: ctx.chat.title,
@@ -1708,7 +1731,7 @@ class Bot {
             license: config.license,
             botStatus: 'unknown',
             reminders: [],
-            admins: await this.getChatAdmins(chatId), // [],
+            admins,
             permissions: this.getDefaultPermissions(config.license),
             features: [],
             settings: {
@@ -1717,17 +1740,6 @@ class Bot {
                 allowVotePlusWithoutMainPlayers: config.allowVotePlusWithoutMainPlayers
             }
         }
-        // if (!chatSettings.allMembersAreAdministrators) {
-            const admins = this.isGroup(chatId) && await this.bot.telegram.getChatAdministrators(chatId);
-            if (admins && admins.length) {
-                chatSettings.admins = admins.map(adm => {
-                    return {
-                        id: adm.user.id,
-                        name: extractUserTitle(adm.user)
-                    }
-                });
-            }
-        // }
         return chatSettings;
     }
 
@@ -2008,6 +2020,12 @@ class Bot {
 
     _getUserPresentation(user, extra = '') {
         return `[${truncateString(user.fullName || user.name, 28)}${extra || ''}](tg://user?id=${user.id})`;
+    }
+
+    _getTimezone(settingsOrGame) {
+        if (settingsOrGame?.timezone) return settingsOrGame?.timezone;
+        if (settingsOrGame?.settings?.timezone) return settingsOrGame?.settings?.timezone;
+        return this.getDefaultSettings().timezone;
     }
 }
 
