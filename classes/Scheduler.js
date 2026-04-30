@@ -1,5 +1,5 @@
 const cron = require('node-cron');
-const { isDate } = require('../helpers/utils');
+const { isDate, sleep } = require('../helpers/utils');
 
 class Scheduler {
     constructor(database, bot, checkInterval = 5) {
@@ -13,6 +13,7 @@ class Scheduler {
     start() {
         this.scheduleGameDeactivation();
         this.scheduleDynamicReminders();
+        this.scheduleVotesNotifications();
     }
 
     stop() {
@@ -30,6 +31,13 @@ class Scheduler {
     scheduleDynamicReminders() {
         const job = cron.schedule(`*/${this.checkInterval} * * * *`, async () => {
             await this.processReminders();
+        });
+        this.jobs.push(job);
+    }
+
+    scheduleVotesNotifications() {
+        const job = cron.schedule(`*/${this.checkInterval} * * * *`, async () => {
+            await this.processVotesNotifications();
         });
         this.jobs.push(job);
     }
@@ -81,6 +89,7 @@ class Scheduler {
                         // Якщо поточний час більший або рівний часу нагадування
                         if (now >= reminderTime && now < timeWindowEnd) {
                             await this.sendDynamicNotification(game, minutesBefore);
+                            await sleep(200);
                         }
                     }
                 }
@@ -113,6 +122,7 @@ class Scheduler {
                         // Якщо поточний час більший або рівний часу нагадування
                         if (now >= reminderTime && now < timeWindowEnd) {
                             await this.sendDynamicNotificationToUser(game, user, minutesBefore);
+                            await sleep(200);
                         }
                     }
                 }
@@ -162,6 +172,148 @@ class Scheduler {
         //     console.error(`[Telegram Error] Chat ${user.userId}:`, error.message);
         // }
         await this.bot.sendMessageEx(user.userId, replyText);
+    }
+
+    async processVotesNotifications() {
+        await sleep(5000);
+        // console.log(`🔔 processVotesNotifications: start`);
+        try {
+            const now = new Date();
+            const chats = await this.database.getChatsWithVotesNotificationSettings();
+            // console.log(`🔔 processVotesNotifications: ${chats.length} chats`);
+            const dueChats = [];
+            let minFromDate = null;
+            const nowMinute = now.getUTCMinutes();
+
+            for (const chatSettings of chats) {
+                const settings = chatSettings.settings || {};
+                const termsRaw = (settings.votesNotificationTerms || '').trim();
+                const intervalMinutes = Number(termsRaw);
+                if (!Number.isInteger(intervalMinutes) || intervalMinutes <= 0) continue;
+                // Без збереження last-check у БД: шлемо лише на "слотах" інтервалу.
+                // При кроні кожні 5 хв це прибирає дублювання.
+                if (nowMinute % intervalMinutes !== 0) continue;
+                const fromDate = new Date(now.getTime() - intervalMinutes * 60000);
+                if (!minFromDate || fromDate < minFromDate) minFromDate = fromDate;
+                dueChats.push({ chatSettings, intervalMinutes, fromDate });
+            }
+
+            if (!dueChats.length || !minFromDate) return;
+            // console.log(`🔔 processVotesNotifications: ${dueChats.length} due chats`);
+
+            const chatIds = dueChats.map((item) => item.chatSettings.chatId);
+            const allRows = await this.database.getVoteHistoryChangesByChats(chatIds, minFromDate, now);
+            console.log(`🔔 processVotesNotifications: ${allRows.length} allRows`);
+            const allGameIds = [...new Set(allRows.map((row) => /*String(row.gameId)*/row.gameId))];
+            const allHistoryRows = await this.database.getVoteHistoryByGameIds(allGameIds);
+            // console.log(`🔔 processVotesNotifications: ${allHistoryRows.length} allHistoryRows`);
+            const historyByGameId = new Map();
+            for (const row of allHistoryRows) {
+                const gid = String(row.gameId);
+                if (!historyByGameId.has(gid)) historyByGameId.set(gid, []);
+                historyByGameId.get(gid).push(row);
+            }
+
+            for (const item of dueChats) {
+                const { chatSettings, intervalMinutes, fromDate } = item;
+                const rows = allRows.filter((row) =>
+                    row.chatId === chatSettings.chatId &&
+                    row.timestamp > fromDate &&
+                    row.timestamp <= now
+                );
+                // console.log(`🔔 processVotesNotifications: ${rows.length} rows`);
+                if (rows.length) {
+                    const rowsByGame = new Map();
+                    for (const row of rows) {
+                        const gid = String(row.gameId);
+                        if (!rowsByGame.has(gid)) rowsByGame.set(gid, []);
+                        rowsByGame.get(gid).push(row);
+                    }
+
+                    for (const [gid, newRowsByGame] of rowsByGame.entries()) {
+                        const allRowsByGame = historyByGameId.get(gid) || [];
+                        const getRowKey = (row) => String(row?._id || `${row?.timestamp?.getTime?.() || row?.timestamp}|${row?.userId}|${row?.action}|${row?.prevStatus}|${row?.newStatus}`);
+                        const newRowsKeys = new Set(newRowsByGame.map((row) => getRowKey(row)));
+                        const allRowsByGameWithFlags = allRowsByGame.map((row) => ({
+                            ...row,
+                            _doNotShow: !newRowsKeys.has(getRowKey(row))
+                        }));
+                        const msg = this.buildVotesNotificationMessage(newRowsByGame, allRowsByGameWithFlags, intervalMinutes, chatSettings.chatId);
+                        if (!msg) continue;
+
+                        const replyToMessageId = newRowsByGame[0]?.gameMessageId;
+                        try {
+                            await this.bot.sendMessageEx(chatSettings.chatId, msg, replyToMessageId ? { reply_to_message_id: replyToMessageId } : {});
+                        } catch (error) {
+                            if (error.response?.body?.description?.includes('message to be replied not found')) {
+                                await this.bot.sendMessageEx(chatSettings.chatId, msg);
+                            } else {
+                                console.error(error);
+                            }
+                        } finally {
+                            await sleep(200);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Помилка при відправці зведення по голосуваннях:', error);
+        }
+    }
+
+    buildVotesNotificationMessage(newRows, allRows, intervalMinutes, chatId) {
+        if (!newRows.length) return '';
+
+        const firstLine = `🗳️ Зміни голосів за останні ${intervalMinutes} хв:`;
+        //_doNotShow
+        return this.bot._buildVotesNotificationMessage(firstLine, allRows, newRows[0]?.timezone, newRows[0]?.gameMaxPlayers);
+        /*
+        const status2emoji = (status) => {
+            if (status === 'joined') return '✅';
+            if (status === 'declined') return '❌';
+            if (status === 'pending') return '❓';
+            if (status === 'kicked') return this.emoji.kick;
+            return '⚪';
+        };
+
+        const action2text = (row) => {
+            if (row.action === 'extra_plus') return '➕ +1';
+            if (row.action === 'extra_minus') return '➖ -1';
+            if (row.prevStatus) return `${status2emoji(row.prevStatus)}→${status2emoji(row.newStatus)}`;
+            return `${status2emoji(row.newStatus)}`;
+        };
+
+        let directJoined = 0;
+        let extraJoined = 0;
+        for (const item of allRows) {
+            if (item.action === 'extra_minus') {
+                extraJoined--;
+            } else if (item.action === 'extra_plus') {
+                extraJoined++;
+            } else {
+                if (item.newStatus === 'joined') directJoined++;
+                if (item.prevStatus === 'joined') directJoined--;
+            }
+        }
+        if (directJoined < 0) directJoined = 0;
+        if (extraJoined < 0) extraJoined = 0;
+        const joinedTotal = directJoined + extraJoined;
+
+        const gameName = newRows[0]?.gameName || '(гра видалена)';
+        const gameMaxPlayers = newRows[0]?.gameMaxPlayers;
+        const lines = newRows.map((row) => {
+            const timeText = row.timestamp instanceof Date
+                ? row.timestamp.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+                : '--:--';
+            const playerName = row.fullName || row.username || `id=${row.userId}`;
+            return `${timeText}, ${playerName} ${action2text(row)}`;
+        });
+
+        return `🗳️ Зміни голосів за останні ${intervalMinutes} хв:\n\n` +
+            //`🏟 ${gameName}\n` +
+            lines.join('\n') +
+            '\n' + '—'.repeat(18) +
+            `\nКількість учасників ${joinedTotal}${gameMaxPlayers ? '/' + gameMaxPlayers : ''}, з них\n  ✅ ${directJoined}\n  ➕ ${extraJoined}`;*/
     }
 
     /**

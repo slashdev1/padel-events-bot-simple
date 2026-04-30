@@ -92,9 +92,11 @@ class Bot {
         this.bot.action(/^back_to_settings_(.*)$/, (ctx) => this.handleBackToShowSettings(ctx));
         this.bot.action(/^edit_settings_tz_(.*)$/, (ctx) => this.handleSettingsChanging(ctx, 'tz'));
         this.bot.action(/^edit_settings_notif_(.*)$/, (ctx) => this.handleSettingsChanging(ctx, 'notif'));
+        this.bot.action(/^edit_settings_votes_notif_(.*)$/, (ctx) => this.handleSettingsChanging(ctx, 'votesNotif'));
         this.bot.action(/^edit_settings_allowVotePlusWO_(.*)$/, (ctx) => this.handleSettingsChanging(ctx, 'allowVotePlusWO'));
         this.bot.action(/^set_settings_tz_(.*)$/, (ctx) => this.handleSettingsSetTimeZone(ctx));
         this.bot.action(/^set_settings_notif_(.*)$/, (ctx) => this.handleSettingsSetNotificationTerms(ctx));
+        this.bot.action(/^set_settings_votes_notif_(.*)$/, (ctx) => this.handleSettingsSetVotesNotificationTerms(ctx));
         this.bot.action(/^set_settings_allowVotePlusWO_(.*)$/, (ctx) => this.handleSettingsSetAllowVotePlusWO(ctx));
         this.bot.action(/^permissions_(.*)$/, (ctx) => this.showPopup(ctx, this.emoji.info + ' Даний функціонал у розробці. Слідкуйте за оновленнями.'));
     }
@@ -217,6 +219,9 @@ class Bot {
             } else if (type === 'notificationTerms') {
                 ctx.match = [null, `${ctx.message.text}_${chatId}`];
                 this.handleSettingsSetNotificationTerms(ctx, messageId);
+            } else if (type === 'votesNotificationTerms') {
+                ctx.match = [null, `${ctx.message.text}_${chatId}`];
+                this.handleSettingsSetVotesNotificationTerms(ctx, messageId);
             }
             delete(this.waitingInput[ctx.from.id]);
         });
@@ -615,6 +620,8 @@ class Bot {
             if (this._checkTimeZone(keyValueObj[key], userId) !== true) return;
         } else if (key === 'notificationTerms') {
             if (this._checkNotificationTerms(keyValueObj[key], userId) !== true) return;
+        } else if (key === 'votesNotificationTerms') {
+            if (this._checkVotesNotificationTerms(keyValueObj[key], userId) !== true) return;
         }
         await this.database.updateUser({ ...ctx.from, settings: keyValueObj }, true);
         /*await*/ this.sendMessage(userId, this.emoji.info + `Налаштування ${key} оновлене.`);
@@ -1004,13 +1011,47 @@ class Bot {
 
         const chatSettings = await this.database.getChatSettings(game.chatId);
         const timezone = this._getTimezone(chatSettings);
+        // const status2emoji = (status) => {
+        //     if (status === 'joined') return '✅'
+        //     if (status === 'declined') return '❌'
+        //     if (status === 'pending') return '❓'
+        //     if (status === 'kicked') return this.emoji.kick
+        // }
+        // let msg = 'Історія голосів:';
+        // let directJoined = 0;
+        // let extraJoined = 0;
+        // for (const item of votesHistory) {
+        //     let dateText = formatToTimeZone(item.timestamp, timezone, true);
+        //     let extra = '';
+        //     if (item.action === 'extra_minus') extra = '➖', extraJoined--;
+        //     else if (item.action === 'extra_plus') extra = '➕', extraJoined++;
+        //     else {
+        //         if (item.prevStatus) extra = status2emoji(item.prevStatus) + '->';
+        //         extra += status2emoji(item.status);
+        //         if (item.status === 'joined') directJoined++;
+        //         if (item.prevStatus === 'joined') directJoined--;
+        //     }
+        //     msg += `\n${dateText}, ${this._getUserPresentation(item)} ${extra}`
+        // }
+        // // console.log(msg);
+        // msg += '\n' + '—'.repeat(18) + `\nКількість учасників ${directJoined + extraJoined}${game.maxPlayers ? '/' + game.maxPlayers : ''}, з них\n  ✅ ${directJoined}\n  ➕ ${extraJoined}`;
+        // msg = textMarkdownNormalize(msg);
+        const firstLine = '🗳️ Історія голосів:';
+        const msg = this._buildVotesNotificationMessage(firstLine, votesHistory, timezone, game.maxPlayers);
+        console.log(msg);
+        this.replyOrDoNothing(ctx, msg, { parse_mode: 'Markdown' });
+    }
+
+    _buildVotesNotificationMessage(firstLine, votesHistory, timezone, maxPlayers) {
         const status2emoji = (status) => {
             if (status === 'joined') return '✅'
             if (status === 'declined') return '❌'
             if (status === 'pending') return '❓'
             if (status === 'kicked') return this.emoji.kick
+            return '⚪';
         }
-        let msg = 'Історія голосів:';
+
+        let msg = firstLine;
         let directJoined = 0;
         let extraJoined = 0;
         for (const item of votesHistory) {
@@ -1024,13 +1065,13 @@ class Bot {
                 if (item.status === 'joined') directJoined++;
                 if (item.prevStatus === 'joined') directJoined--;
             }
+            if (item._doNotShow) continue;
             msg += `\n${dateText}, ${this._getUserPresentation(item)} ${extra}`
         }
         // console.log(msg);
-        msg += '\n' + '—'.repeat(18) + `\nКількість учасників ${directJoined + extraJoined}${game.maxPlayers ? '/' + game.maxPlayers : ''}, з них\n  ✅ ${directJoined}\n  ➕ ${extraJoined}`;
+        msg += '\n' + '—'.repeat(18) + `\nКількість учасників ${directJoined + extraJoined}${maxPlayers ? '/' + maxPlayers : ''}, з них\n  ✅ ${directJoined}\n  ➕ ${extraJoined}`;
         msg = textMarkdownNormalize(msg);
-        console.log(msg);
-        this.replyOrDoNothing(ctx, msg, { parse_mode: 'Markdown' });
+        return msg;
     }
 
     async _getAndCheckGameForActivation(ctx) {
@@ -1125,7 +1166,8 @@ class Bot {
 
         const buttons = [
             [Markup.button.callback(this.emoji.edit + ' Часову зону', `edit_settings_tz_${chatId}`)],
-            [Markup.button.callback(this.emoji.edit + ' Інтервал нагадувань', `edit_settings_notif_${chatId}`)]
+            [Markup.button.callback(this.emoji.edit + ' Інтервал нагадувань', `edit_settings_notif_${chatId}`)],
+            [Markup.button.callback(this.emoji.edit + ' Інтервал звіту голосувань', `edit_settings_votes_notif_${chatId}`)]
         ];
         if (this.isGroup(chatId))
             buttons.push([Markup.button.callback(this.emoji.edit + ' Дозволити "+" якщо сам ігрок не йде', `edit_settings_allowVotePlusWO_${chatId}`)]);
@@ -1164,6 +1206,15 @@ class Bot {
                 [Markup.button.callback('За 2 години', `set_settings_notif_-120_${chatId}`)],
                 [Markup.button.callback('За 1 годину', `set_settings_notif_-60_${chatId}`)],
                 [Markup.button.callback('Ввести вручну', `set_settings_notif_manual_${chatId}`)],
+                [Markup.button.callback('🔙 До налаштувань', `back_to_settings_${chatId}`)]
+            ]).reply_markup);
+        } else if (mode === 'votesNotif') {
+            await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([
+                [Markup.button.callback('Не надсилати звіти', `set_settings_votes_notif__${chatId}`)],
+                [Markup.button.callback('Кожні 15 хв', `set_settings_votes_notif_15_${chatId}`)],
+                [Markup.button.callback('Кожні 30 хв', `set_settings_votes_notif_30_${chatId}`)],
+                [Markup.button.callback('Кожні 60 хв', `set_settings_votes_notif_60_${chatId}`)],
+                // [Markup.button.callback('Ввести вручну', `set_settings_votes_notif_manual_${chatId}`)],
                 [Markup.button.callback('🔙 До налаштувань', `back_to_settings_${chatId}`)]
             ]).reply_markup);
         } else if (mode === 'allowVotePlusWO') {
@@ -1207,6 +1258,46 @@ class Bot {
         }
 
         // delete(this.currentMarkup[messageId]);
+
+        const msg = this.emoji.info + ' Налаштування змінено.';
+        if (ctx.callbackQuery) this.showPopup(ctx, msg);
+        else this.replyToUserDirectOrDoNothing(ctx, msg);
+
+        const _chatId = ctx.update?.callback_query?.message?.chat?.id || this.getChatId(ctx);
+        this.updateSetingsMessage(_chatId, messageId, settings, chatId, chatName);
+    }
+
+    async handleSettingsSetVotesNotificationTerms(ctx, messageId) {
+        if (!messageId) {
+            messageId = ctx.update.callback_query.message.message_id;
+            this.currentMarkup[messageId] = ctx.update.callback_query.message.reply_markup;
+        }
+
+        const key = 'votesNotificationTerms';
+        let [value, chatId] = ctx.match[1].split('_');
+        chatId = +chatId;
+        if (this.isGroup(chatId) && !await this.ensureAccess(ctx, this.getUserId(ctx), chatId, null, 'change_settings'))
+            return false;
+
+        if (value === 'manual') {
+            const messageId = ctx.update.callback_query.message.message_id;
+            this.waitingInput[ctx.from.id] = { type: key, chatId, messageId: messageId };
+            ctx.reply('Введіть інтервал у хвилинах для надсилання зведення по голосуваннях:', { reply_to_message_id: messageId });
+            return;
+        }
+
+        const userId = this.getUserId(ctx);
+        if (this._checkVotesNotificationTerms(value, userId) !== true) return;
+
+        const settings = await this.database.getSettingsByChatId(chatId);
+        settings[key] = value;
+        let chatName;
+        if (this.isGroup(chatId)) {
+            await this.database.updateChatSettings({ chatId, settings });
+            chatName = (await this.database.getChatSettings(chatId) || {}).chatName;
+        } else {
+            await this.database.updateUser({ id: userId, settings }, true);
+        }
 
         const msg = this.emoji.info + ' Налаштування змінено.';
         if (ctx.callbackQuery) this.showPopup(ctx, msg);
@@ -1700,6 +1791,7 @@ class Bot {
             ...(!!isGroup ? { license: this.config.licenseClientDefault || 'free' } : {}),
             timezone: this.config.timezoneClientDefault,
             notificationTerms: this.config.notificationTerms || '-1440,-60',
+            votesNotificationTerms: '',
             ...(!!isGroup ? { allowVotePlusWithoutMainPlayers: false } : {})
         };
     }
@@ -1737,6 +1829,7 @@ class Bot {
             settings: {
                 timezone: config.timezone,
                 notificationTerms: config.notificationTerms,
+                votesNotificationTerms: config.votesNotificationTerms,
                 allowVotePlusWithoutMainPlayers: config.allowVotePlusWithoutMainPlayers
             }
         }
@@ -1972,6 +2065,16 @@ class Bot {
         return true;
     }
 
+    _checkVotesNotificationTerms(votesNotificationTerms, userId) {
+        if (votesNotificationTerms.trim().length === 0) return true;
+        const value = Number(votesNotificationTerms);
+        if (!Number.isInteger(value) || value <= 0) {
+            this.sendMessage(userId, this.emoji.warn + 'Некоректне значення налаштування. Вкажіть ціле число хвилин або пусте значення.');
+            return false;
+        }
+        return true;
+    }
+
     async getChatAdmins(chatId) {
         return await this.bot.telegram.getChatAdministrators(chatId);
     }
@@ -1982,7 +2085,10 @@ class Bot {
             const chatTitle = chatName;
             extra = ' для групи ' + chatTitle;
         }
-        return this.emoji.setup + ' Поточні налаштування' + extra + ':\n\n' + JSON.stringify(settings || {}, null, 2)
+        const settingsForDisplay = { ...(settings || {}) };
+        const rawVotesTerms = (settingsForDisplay.votesNotificationTerms ?? '').toString().trim();
+        settingsForDisplay.votesNotificationTermsText = rawVotesTerms.length ? `кожні ${rawVotesTerms} хв` : 'вимкнено';
+        return this.emoji.setup + ' Поточні налаштування' + extra + ':\n\n' + JSON.stringify(settingsForDisplay, null, 2)
     }
 
     async updateSetingsMessage(chatId, messageId, settings, chatIdForSettings, chatNameForSettings) {

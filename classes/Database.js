@@ -456,6 +456,7 @@ class Database {
                     subgames: 1,
                     timezone: '$chatSettings.settings.timezone',
                     notificationTerms: '$chatSettings.settings.notificationTerms',
+                    votesNotificationTerms: '$chatSettings.settings.votesNotificationTerms',
                     license: '$chatSettings.license',
                     notifications: 1
                 }
@@ -651,6 +652,161 @@ class Database {
             timestamp: event.timestamp instanceof Date ? event.timestamp : new Date()
         };
         await this.gameVoteHistoryCollection().insertOne(doc);
+    }
+
+    async getChatsWithVotesNotificationSettings() {
+        return await this.chatSettingsCollection().aggregate([
+            {
+                $match: {
+                    'settings.votesNotificationTerms': { $exists: true, $ne: '' }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    chatId: 1,
+                    chatName: 1,
+                    settings: 1
+                }
+            }
+        ]).toArray();
+    }
+
+    async getVoteHistoryChangesByChat(chatId, fromDate, toDate = new Date()) {
+        return await this.gameVoteHistoryCollection().aggregate([
+            {
+                $match: {
+                    chatId,
+                    timestamp: {
+                        $gt: fromDate,
+                        $lte: toDate
+                    }
+                }
+            },
+            { $sort: { timestamp: 1 } },
+            {
+                $lookup: {
+                    from: 'games',
+                    localField: 'gameId',
+                    foreignField: '_id',
+                    as: 'game'
+                }
+            },
+            { $unwind: { path: '$game', preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 0,
+                    gameId: 1,
+                    gameName: '$game.name',
+                    userId: 1,
+                    username: 1,
+                    fullName: 1,
+                    subgameIndex: 1,
+                    extraPlayer: 1,
+                    action: 1,
+                    prevStatus: 1,
+                    newStatus: 1,
+                    timestamp: 1
+                }
+            }
+        ]).toArray();
+    }
+
+    async getVoteHistoryChangesByChats(chatIds, fromDate, toDate = new Date()) {
+        if (!Array.isArray(chatIds) || chatIds.length === 0) return [];
+        const rows = await this.gameVoteHistoryCollection().aggregate([
+            {
+                $match: {
+                    chatId: { $in: chatIds },
+                    timestamp: {
+                        $gt: fromDate,
+                        $lte: toDate
+                    }
+                }
+            },
+            { $sort: { timestamp: 1 } },
+            {
+                $lookup: {
+                    from: 'games',
+                    localField: 'gameId',
+                    foreignField: '_id',
+                    as: 'game'
+                }
+            },
+            { $unwind: { path: '$game', preserveNullAndEmptyArrays: true } },
+            {
+                $lookup: {
+                    from: 'chatSettings',
+                    localField: 'chatId',
+                    foreignField: 'chatId',
+                    as: 'chatSettings'
+                }
+            },
+            { $unwind: { path: '$chatSettings', preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 0,
+                    chatId: 1,
+                    gameId: 1,
+                    gameName: '$game.name',
+                    gameMaxPlayers: '$game.maxPlayers',
+                    gameMessageId: '$game.messageId',
+                    userId: 1,
+                    username: 1,
+                    fullName: 1,
+                    subgameIndex: 1,
+                    extraPlayer: 1,
+                    action: 1,
+                    prevStatus: 1,
+                    newStatus: 1,
+                    timestamp: 1,
+                    timezone: '$chatSettings.settings.timezone'
+                }
+            }
+        ]).toArray();
+        return rows;
+    }
+
+    async getVoteHistoryByGameIds(gameIds) {
+        if (!Array.isArray(gameIds) || gameIds.length === 0) return [];
+        const objectIds = gameIds.map((id) => this._id(id));
+        const rows = await this.gameVoteHistoryCollection().aggregate([
+            {
+                $match: {
+                    gameId: { $in: objectIds }
+                }
+            },
+            { $sort: { timestamp: 1 } },
+            {
+                $lookup: {
+                    from: 'games',
+                    localField: 'gameId',
+                    foreignField: '_id',
+                    as: 'game'
+                }
+            },
+            { $unwind: { path: '$game', preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 0,
+                    chatId: 1,
+                    gameId: 1,
+                    gameName: '$game.name',
+                    gameMaxPlayers: '$game.maxPlayers',
+                    gameMessageId: '$game.messageId',
+                    userId: 1,
+                    username: 1,
+                    fullName: 1,
+                    subgameIndex: 1,
+                    extraPlayer: 1,
+                    action: 1,
+                    prevStatus: 1,
+                    newStatus: 1,
+                    timestamp: 1
+                }
+            }
+        ]).toArray();
+        return rows.map((d) => { return { ...d, ...this._publicGamePlayer({ ...d, id: d.userId, name: d.username, status: d.newStatus }) }; });
     }
 
     // Auxiliary function
