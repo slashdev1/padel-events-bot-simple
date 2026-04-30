@@ -1027,7 +1027,7 @@ class Bot {
             msg += `\n${dateText}, ${this._getUserPresentation(item)} ${extra}`
         }
         // console.log(msg);
-        msg += '—'.repeat(18) + `\nКількість учасників ${directJoined + extraJoined}${game.maxPlayers ? '/' + game.maxPlayers : ''}, з них\n  ✅ ${directJoined}\n  ➕ ${extraJoined}`;
+        msg += '\n' + '—'.repeat(18) + `\nКількість учасників ${directJoined + extraJoined}${game.maxPlayers ? '/' + game.maxPlayers : ''}, з них\n  ✅ ${directJoined}\n  ➕ ${extraJoined}`;
         msg = textMarkdownNormalize(msg);
         console.log(msg);
         this.replyOrDoNothing(ctx, msg, { parse_mode: 'Markdown' });

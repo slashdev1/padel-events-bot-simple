@@ -46,9 +46,6 @@ class Database {
         console.log(`Connected to MongoDB (db ${this.dbName})`);
         await this.ensureGamePlayersIndexes();
         await this.ensureGameVoteHistoryIndexes();
-
-        // const chatSettings = await this.chatSettingsCollection().findOne({ chatId: -5175576414 })
-        // console.log(JSON.stringify(chatSettings));
     }
 
     async disconnect() {
