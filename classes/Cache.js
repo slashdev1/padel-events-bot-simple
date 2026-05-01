@@ -58,6 +58,7 @@ class Cache {
     async getOrSet(key, fetcher, ttlMs) {
         const existing = this.get(key);
         if (existing !== undefined) return existing;
+        console.log(`Debug >>> Cache.getOrSet run fetcher for key ${key}`);
         const value = await fetcher();
         this.set(key, value, ttlMs);
         return value;

@@ -112,6 +112,10 @@ const isNumeric = (input) => {
     return typeof input === 'number' || !Number.isNaN(Number(input));
 }
 
+const isInteger = (input) => {
+    return (typeof input === 'number' && Number.isInteger(input)) || (typeof input === 'string' && Number.isInteger(Number(input)));
+}
+
 const convertTZ = (date, tzString) => {
     return new Date((typeof date === 'string' || typeof date === 'number' ? new Date(date) : date).toLocaleString('en-US', { timeZone: tzString }));
 }
@@ -416,5 +420,6 @@ module.exports = {
     isDate,
     arraysEqualUnordered,
     truncateString,
-    unescapeString
+    unescapeString,
+    isInteger
 };

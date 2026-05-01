@@ -202,7 +202,9 @@ class Database {
         doc.createdDate = new Date;
         const result = await this.gamesCollection().insertOne(doc);
         gameData._id = result.insertedId;
-        this.invalidateGameCache(result.insertedId);
+        // Оптимізація: додаємо кеш замість очищення, яке не має сенсу, бо гра тільки що створена
+        // this.invalidateGameCache(result.insertedId);
+        this.cache.set(this.getGameCacheKey(result.insertedId), doc, this.ttlGameDataMs);
         return result.insertedId;
     }
 
@@ -233,7 +235,12 @@ class Database {
             { _id: this._id(gameId)},
             { $set: payload }
         );
-        this.invalidateGameCache(gameId);
+        // Оптимізація: оновлюємо кеш замість очищення
+        // this.invalidateGameCache(gameId);
+        const existing = this.cache.get(this.getGameCacheKey(gameId));
+        if (existing) {
+            this.cache.set(this.getGameCacheKey(gameId), { ...existing, ...payload }, this.ttlGameDataMs);
+        }
         return result;
     }
 

@@ -23,7 +23,8 @@ const {
     formatToTimeZone,
     isDate,
     truncateString,
-    unescapeString
+    unescapeString,
+    isInteger
 } = require('../helpers/utils');
 const { Temporal } = require('@js-temporal/polyfill');
 const { GameStatus } = require('./Database');
@@ -1582,6 +1583,7 @@ class Bot {
     }
 
     parseDateByChatSettings(stringDate, chatSettings = {}) {
+        console.log(`Debug >>> parseDateByChatSettings: ${stringDate}, ${chatSettings?.settings?.timezone}`);
         if (chatSettings?.settings?.timezone) {
             const isoString = stringDate.replace(/\./g, '-').replace(' ', 'T').replace(/T(\d):/, "T0$1:"); // T9:00 -> T09:00
             return Temporal.ZonedDateTime.from(`${isoString}[${chatSettings.settings.timezone}]`).toInstant().toString();
@@ -1980,7 +1982,7 @@ class Bot {
 
         const gameData = {};
         const { params, remainingArgs } = buildRemainingArgs(args);
-        const onlyGameName = (remainingArgs.length != 3 || !isNumeric(remainingArgs[2]));
+        const onlyGameName = (remainingArgs.length != 3 || !isInteger(remainingArgs[2]));
         if (!onlyGameName)
             if (remainingArgs.length < 3) return gameData.error = this.replyWarning(ctx, cmdName, 'Передана недостатня кількість параметрів.'), gameData;
             else if (remainingArgs.length > 3) return gameData.error = this.replyWarning(ctx, cmdName, 'Передана некоректа кількість параметрів. ' + (occurrences(msgText, '"') > 2 ? 'Скоріше проблема з використанням подвійних лапок ("). ' : '')), gameData;
