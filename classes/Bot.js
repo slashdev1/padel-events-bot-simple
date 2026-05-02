@@ -70,6 +70,7 @@ class Bot {
         this.bot.command('__adm', this.handleGetAdm.bind(this));
         this.bot.command('__del_msg', this.handleDeleteMessage.bind(this));
         this.bot.command('__refresh_game_msg', this.handleRefreshGameMessage.bind(this));
+        this.bot.command('__chats', this.handleGetChatSettingsList.bind(this));
     }
 
     setupActions() {
@@ -684,6 +685,16 @@ class Bot {
         game.players = await this.database.getGamePlayers(gameId);
         this.updateGameMessage(game, gameId);
         return this.replyOrDoNothing(ctx, this.emoji.info + ' Оновлено повідомлення для гри ' + game.name + '.');
+    }
+
+    async handleGetChatSettingsList(ctx) {
+        // console.log('handleGetChatSettingsList', ctx.chat.id);
+        if (this.isGroup(ctx.chat.id)) return;
+        // if (!await this.isSuperAdmin(ctx)) return;
+
+        const chatSettingsList = await this.database.getChatSettingsList();
+        const text = chatSettingsList.map(chatSettings => `💬 ${chatSettings.chatName} (id=${chatSettings.chatId}), ${chatSettings.botStatus}`).join('\n');
+        return this.replyOrDoNothing(ctx, this.emoji.info + ' Список чатів:' + '\n\n' + text);
     }
 
     subgameDateMs(subgame) {

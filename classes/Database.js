@@ -577,6 +577,10 @@ class Database {
         return undefined;
     }
 
+    async getChatSettingsList() {
+        return await this.chatSettingsCollection().find({}).toArray();
+    }
+
     // Global settings operations
     async getGlobalSettings() {
         const cacheKey = 'globalSettings';
