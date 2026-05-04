@@ -120,23 +120,52 @@ const convertTZ = (date, tzString) => {
     return new Date((typeof date === 'string' || typeof date === 'number' ? new Date(date) : date).toLocaleString('en-US', { timeZone: tzString }));
 }
 
-const formatToTimeZone = (date, timeZone, showSeconds = false) => {
+// const formatToTimeZone = (date, timeZone, showSeconds = false) => {
+//     const options = {
+//         timeZone: timeZone,
+//         day: '2-digit',
+//         month: '2-digit',
+//         year: 'numeric',
+//         hour: '2-digit',
+//         minute: '2-digit',
+//         hour12: false // формат 24г
+//     };
+//     if (showSeconds) {
+//         options.second = '2-digit';
+//     }
+
+//     return new Intl.DateTimeFormat('uk-UA', options)
+//         .format(date)
+//         .replace(',', '');
+// }
+const formatToTimeZone = (date, timeZone, format = "dd.mm.yyyy hh:MM") => {
     const options = {
         timeZone: timeZone,
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false // формат 24г
+        hour12: false,
+        // Визначаємо наявність компонентів у рядку формату
+        year: format.includes('yyyy') ? 'numeric' : undefined,
+        month: format.includes('mm') ? '2-digit' : undefined,
+        day: format.includes('dd') ? '2-digit' : undefined,
+        hour: format.includes('hh') ? '2-digit' : undefined,
+        minute: format.includes('MM') ? '2-digit' : undefined,
+        second: format.includes('ss') ? '2-digit' : undefined
     };
-    if (showSeconds) {
-        options.second = '2-digit';
-    }
 
-    return new Intl.DateTimeFormat('uk-UA', options)
-        .format(date)
-        .replace(',', '');
+    // Отримуємо частини дати через formatToParts для точного контролю
+    const formatter = new Intl.DateTimeFormat('uk-UA', options);
+    const parts = formatter.formatToParts(date);
+
+    // Створюємо карту значень { type: value }
+    const map = new Map(parts.map(p => [p.type, p.value]));
+
+    // Замінюємо шаблони у рядку на реальні значення
+    return format
+        .replace('dd', map.get('day'))
+        .replace('mm', map.get('month'))
+        .replace('yyyy', map.get('year'))
+        .replace('hh', map.get('hour'))
+        .replace('MM', map.get('minute'))
+        .replace('ss', map.get('second'));
 }
 
 const parseDate = (str, timezoneOrOffset) => {

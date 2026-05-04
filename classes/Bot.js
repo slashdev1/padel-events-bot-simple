@@ -1050,7 +1050,7 @@ class Bot {
         // msg = textMarkdownNormalize(msg);
         const firstLine = '🗳️ Історія голосів:';
         const msg = this._buildVotesNotificationMessage(firstLine, votesHistory, timezone, game.maxPlayers);
-        console.log(msg);
+        // console.log(msg);
         this.replyOrDoNothing(ctx, msg, { parse_mode: 'Markdown' });
     }
 
@@ -1067,7 +1067,7 @@ class Bot {
         let directJoined = 0;
         let extraJoined = 0;
         for (const item of votesHistory) {
-            let dateText = formatToTimeZone(item.timestamp, timezone, true);
+            let dateText = formatToTimeZone(item.timestamp, timezone, 'dd.mm hh:MM:ss');
             let extra = '';
             if (item.action === 'extra_minus') extra = '➖', extraJoined--;
             else if (item.action === 'extra_plus') extra = '➕', extraJoined++;
