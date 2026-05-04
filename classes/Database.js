@@ -414,7 +414,7 @@ class Database {
                                     $and: [
                                         // Порівнюємо gameId (якщо він у вас збережений як рядок, додайте конвертацію)
                                         { $eq: ['$gameId', '$$game_id'] },
-                                        { $eq: [/*'$isActive', true*/'$status', GameStatus.ACTIVE] }
+                                        { $eq: ['$isActive', true] }
                                     ]
                                 }
                             }
@@ -451,6 +451,7 @@ class Database {
             // 3. Формуємо фінальний об'єкт
             {
                 $project: {
+
                     _id: 1,
                     name: 1,
                     date: 1,
@@ -479,6 +480,40 @@ class Database {
             async () => this.getUserFromDB(userId), //await this.usersCollection().findOne({ userId }),
             this.ttlUserDataMs
         );
+    }
+
+    async getUsers(userIds) {
+        // 1. Очищуємо вхідні дані від дублікатів (захист від зайвих запитів)
+        const uniqueIds = [...new Set(userIds)];
+
+        const users = [];
+        const remainingUserIds = [];
+
+        // 2. Перевіряємо кеш
+        for (const userId of uniqueIds) {
+            const cachedUser = this.cache.get(`User:${userId}`);
+            if (cachedUser) {
+                users.push(cachedUser);
+            } else {
+                remainingUserIds.push(userId);
+            }
+        }
+
+        // 3. Йдемо в БД тільки якщо є "пропуски" в кеші
+        if (remainingUserIds.length > 0) {
+            const usersFromDB = await this.usersCollection()
+                .find({ userId: { $in: remainingUserIds } })
+                .toArray();
+
+            for (const user of usersFromDB) {
+                // Оновлюємо кеш для наступних запитів
+                this.cache.set(`User:${user.userId}`, user, this.ttlUserDataMs);
+                // Додаємо в результуючий масив
+                users.push(user);
+            }
+        }
+
+        return users;
     }
 
     async getUserFromDB(userId) {
@@ -622,7 +657,7 @@ class Database {
                     $set: {
                         isActive: {
                             $cond: {
-                                if: { $eq: [/*'$isActive', true*/'$status', GameStatus.ACTIVE] },
+                                if: { $eq: ['$isActive', true] },
                                 then: false,
                                 else: true
                             }

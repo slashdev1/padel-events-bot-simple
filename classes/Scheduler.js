@@ -98,12 +98,18 @@ class Scheduler {
                 const userIds = [...new Set(game.players.filter(p => p.status === 'joined').map(p => p.id))];
                 // Ігроки що підписались на нагадування за 1 годину (-60)
                 const userIdsSubscribed = game.notifications.filter(v => userIds.includes(v.userId)).map(v => v.userId);
-                for (const userId of userIds) {
+                /*for (const userId of userIds) {
                     // TODO: отримувати 1 раз усіх юзерів
                     let user = await this.database.getUser(userId);
-                    if (!user || !user.started) continue;
-
-                    termsString = user.settings && user.settings.notificationTerms;
+                    if (!user || !user.started) continue;*/
+                // Оптимізація: отримання одним запитом усіх користувачів і запис у кеш
+                const users = (await this.database.getUsers(userIds)).filter(user => user.started);
+                // console.log(userIds);
+                // console.log(userIdsSubscribed);
+                // console.log(users);
+                for (let user of users) {
+                    let userId = user.userId;
+                    let termsString = user.settings && user.settings.notificationTerms;
                     const isSubscribed = userIdsSubscribed.includes(userId);
                     if (isSubscribed) {
                         // Якщо ігрок натиснув, то треба нагадування у будь якому випадку
@@ -111,13 +117,15 @@ class Scheduler {
                         // Якщо поле notificationTerms присутнє і воно пусте, це означає що не треба нагадувань
                         if (termsString === '') continue;
                     }
+                    // console.log(isSubscribed);
                     termsString = termsString || "-1440,-60";
                     const terms = termsString.split(',').map(Number);
                     if (isSubscribed && !terms.includes(-60)) terms.push(-60); // Дефолтний термін нагадування за 1 годину, якщо ігрок натиснув відповідну кнопку у грі
-
+                    // console.log(terms);
                     for (const minutesBefore of terms) {
                         const reminderTime = new Date(gameDate.getTime() + minutesBefore * 60000);
                         const timeWindowEnd = new Date(reminderTime.getTime() + this.checkInterval * 60000);
+                        // console.log(now, reminderTime, timeWindowEnd);
 
                         // Якщо поточний час більший або рівний часу нагадування
                         if (now >= reminderTime && now < timeWindowEnd) {
@@ -203,7 +211,7 @@ class Scheduler {
 
             const chatIds = dueChats.map((item) => item.chatSettings.chatId);
             const allRows = await this.database.getVoteHistoryChangesByChats(chatIds, minFromDate, now);
-            console.log(`🔔 processVotesNotifications: ${allRows.length} allRows`);
+            // console.log(`🔔 processVotesNotifications: ${allRows.length} allRows`);
             const allGameIds = [...new Set(allRows.map((row) => /*String(row.gameId)*/row.gameId))];
             const allHistoryRows = await this.database.getVoteHistoryByGameIds(allGameIds);
             // console.log(`🔔 processVotesNotifications: ${allHistoryRows.length} allHistoryRows`);

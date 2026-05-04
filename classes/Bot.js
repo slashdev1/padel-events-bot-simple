@@ -1223,6 +1223,8 @@ class Bot {
         } else if (mode === 'votesNotif') {
             await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([
                 [Markup.button.callback('Не надсилати звіти', `set_settings_votes_notif__${chatId}`)],
+                [Markup.button.callback('Кожні 5 хв', `set_settings_votes_notif_5_${chatId}`)],
+                [Markup.button.callback('Кожні 10 хв', `set_settings_votes_notif_10_${chatId}`)],
                 [Markup.button.callback('Кожні 15 хв', `set_settings_votes_notif_15_${chatId}`)],
                 [Markup.button.callback('Кожні 30 хв', `set_settings_votes_notif_30_${chatId}`)],
                 [Markup.button.callback('Кожні 60 хв', `set_settings_votes_notif_60_${chatId}`)],
@@ -1420,8 +1422,10 @@ class Bot {
         if (user.settings?.notificationTerms) return this.showPopup(ctx, this.emoji.warn + ' У вас вже є в налаштуваннях встановлені періоди нагадувань: ' + user.settings?.notificationTerms.split(',').map(v => `за ${-v} хв`).join(', ') + '.');
 
         const notification = await this.database.createNotification(gameId, userId);
-        if (!notification) return this.showPopup(ctx, this.emoji.err + 'Помилка при створені нагадування. Зверніться до розробника.');
-        if (!notification.isActive) return this.showPopup(ctx, this.emoji.notif + 'Нагадування про гру видалено. Не запізнюйтесь на гру.');
+        if (!notification)
+            return this.showPopup(ctx, this.emoji.err + 'Помилка при створені нагадування. Зверніться до розробника.');
+        if (!notification.isActive)
+            return this.showPopup(ctx, this.emoji.info + 'Нагадування про гру видалено. Не запізнюйтесь на гру.');
         this.showPopup(ctx, this.emoji.notif + 'Нагадаю вам про гру за 1 годину. Набирайтесь сил.');
     }
 
