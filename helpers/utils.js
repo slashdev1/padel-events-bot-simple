@@ -270,8 +270,8 @@ function parseDateFromString(text) {
         }));
     }
 
-    // Если не найдено, ищем строго dd.mm (например 1.04, 22.04, 31.11)
-    const dateRegexShort = /\b(\d{1,2})\.(\d{1,2})\b/g;
+    // Если не найдено, ищем строго dd.mm (например 1.04, 22/04, 31.11)
+    const dateRegexShort = /\b(\d{1,2})[\./](\d{1,2})\b/g;
 
     matches = [...text.matchAll(dateRegexShort)].filter(match => +match[1] <= 31 && +match[2] <= 12);
     const currentYear = new Date().getFullYear();

@@ -98,6 +98,9 @@ class PadelBotApp {
     }
 }
 
+process.env.TZ = 'UTC';
+console.log(new Date().toString());
+
 // Start the application
 const app = new PadelBotApp();
 app.start().catch(error => {

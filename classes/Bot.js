@@ -200,7 +200,7 @@ class Bot {
 
             const { type, gameId, chatId, messageId } = input;
             if (gameId) {
-                const game = await this.database.getGameWithPlayers(gameId);
+                const game = await this.database.getGame/*WithPlayers*/(gameId);
                 if (!game) return;
 
                 let update = { [type]: ctx.message.text };
@@ -455,6 +455,7 @@ class Bot {
     }
 
     async _changeGame(ctx, game, supportedParams) {
+        console.log(supportedParams);
         const updateData = {};
         for (let key in supportedParams) {
             if (supportedParams[key] === null) {
@@ -472,11 +473,12 @@ class Bot {
                 if (subgame) return this.replyToUserDirectOrDoNothing(ctx, this.emoji.warn + 'Не можна змінити дату у гри з підіграми (лігами).');
 
                 const stringDate = supportedParams[key];
-                //const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
                 const chatSettings = await this.database.getChatSettings(game.chatId);
-                const parsedDate = parseDate(stringDate, this._getTimezone(chatSettings));
+                const parsedDate = this.parseDateByChatSettings(stringDate, chatSettings);
+                // const parsedDate = parseDate(stringDate, this._getTimezone(chatSettings));
                 if (!parsedDate) return this.replyToUserDirectOrDoNothing(ctx, this.invalidDateFormatMessage);
                 game.date = updateData.date = new Date(parsedDate);
+                console.log('Дата гри змінена на ' + game.date);
                 game.isDateWithoutTime = updateData.isDateWithoutTime = getDigitGroupCount(stringDate) < 4;
                 // game.date = updateData.date;
                 // game.isDateWithoutTime = updateData.isDateWithoutTime;
